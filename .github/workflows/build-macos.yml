@@ -89,6 +89,7 @@ jobs:
         run: |
           source $HOME/.cargo/env
           cd src-tauri
+          cargo update
           cargo tauri build
           cd ..
       
