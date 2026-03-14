@@ -53,11 +53,6 @@
         "frameworks": [],
         "minimumSystemVersion": "10.13",
         "exceptionDomain": "",
-        "signing": {
-          "identity": null,
-          "entitlements": null
-        },
-        "providerShortName": null,
         "signingIdentity": null,
         "hardenedRuntime": true,
         "entitlements": "../entitlements.plist"
@@ -69,8 +64,7 @@
         "bundleMediaFramework": true
       },
       "dmg": {
-        "background": "../dmg-background.png",
-        "window": {
+        "windowSize": {
           "width": 600,
           "height": 400
         },
