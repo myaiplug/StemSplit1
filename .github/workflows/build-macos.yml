@@ -82,14 +82,14 @@ jobs:
       - name: Install Tauri CLI
         run: |
           source $HOME/.cargo/env
-          cargo install tauri-cli --version "^1.0" --locked
+          cargo install tauri-cli --version "=1.5.14" --locked
       
       - name: Build Tauri app
         run: |
           source $HOME/.cargo/env
           cd src-tauri
-          cargo update
-          cargo clean -p stem-split || true
+          cargo clean -p stem-split 2>/dev/null || true
+          rm -rf target/release/build/stem-split* 2>/dev/null || true
           cargo tauri build
           cd ..
       
@@ -185,7 +185,7 @@ jobs:
       - name: Install Tauri CLI
         run: |
           source $HOME/.cargo/env
-          cargo install tauri-cli --version "^1.0" --locked
+          cargo install tauri-cli --version "=1.5.14" --locked
       
       - name: Build
         run: |
@@ -193,6 +193,7 @@ jobs:
           chmod +x setup_python_env_mac.sh
           ./setup_python_env_mac.sh
           cd src-tauri
+          cargo clean -p stem-split 2>/dev/null || true
           cargo tauri build --target ${{ matrix.target }}
       
       - name: Upload build
