@@ -1,0 +1,63 @@
+# Dependencies
+node_modules/
+python_env/
+python_embed/
+embedded_python/
+.venv/
+venv/
+env/
+
+# Next.js build outputs
+.next/
+out/
+build/
+
+# Build outputs
+dist/
+installers/
+src-tauri/target/
+*.dmg
+*.exe
+*.app
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary
+temp.dmg
+*.zip
+
+# Model files (too large for git)
+Stem Split Models/
+models/
+*.ckpt
+*.pth
+*.pt
+
+# Test files
+test_audio/
+output/
+temp_audio/

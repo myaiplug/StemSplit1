@@ -1,0 +1,13 @@
+torch
+torchaudio
+demucs
+librosa
+pynvml
+psutil
+soundfile
+numpy
+resampy
+tqdm
+pedalboard>=0.8.0
+pydub>=0.25.1
+sounddevice
