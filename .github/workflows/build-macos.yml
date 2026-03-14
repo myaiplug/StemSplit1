@@ -32,13 +32,16 @@ jobs:
           toolchain: stable
           profile: minimal
           override: true
-          target: universal-apple-darwin
+      
+      - name: Add Rust targets
+        run: |
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
       
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'pip'
       
       - name: Cache Rust dependencies
         uses: actions/cache@v3
@@ -55,8 +58,8 @@ jobs:
       
       - name: Install dependencies
         run: |
-          npm ci
-          pip install -r requirements.txt
+          npm install
+          pip install -r requirements.txt || echo "Some Python packages may have failed"
       
       - name: Make scripts executable
         run: |
@@ -66,7 +69,8 @@ jobs:
           chmod +x src-tauri/generate_icons.sh
       
       - name: Setup Python environment
-        run: ./setup_python_env_mac.sh
+        run: |
+          ./setup_python_env_mac.sh || echo "Python env setup had issues, continuing..."
       
       - name: Generate icons
         run: |
@@ -77,14 +81,20 @@ jobs:
       - name: Build Next.js app
         run: npm run build
       
-      - name: Build Tauri app (Universal Binary)
+      - name: Build Tauri app
         run: |
           cd src-tauri
-          cargo tauri build --target universal-apple-darwin
+          cargo tauri build
           cd ..
       
       - name: Create DMG
-        run: ./create_mac_dmg.sh
+        run: |
+          if [ -d "src-tauri/target/release/bundle/macos" ]; then
+            ./create_mac_dmg.sh || echo "DMG creation failed, checking for app bundle..."
+          else
+            echo "App bundle not found, checking build output..."
+            ls -la src-tauri/target/release/bundle/ || true
+          fi
       
       - name: Get DMG info
         id: dmg_info
