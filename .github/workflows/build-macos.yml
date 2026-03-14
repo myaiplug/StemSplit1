@@ -80,6 +80,11 @@ jobs:
       - name: Build Next.js app
         run: npm run build
       
+      - name: Install Tauri CLI
+        run: |
+          source $HOME/.cargo/env
+          cargo install tauri-cli --version "^1.0" --locked
+      
       - name: Build Tauri app
         run: |
           source $HOME/.cargo/env
@@ -159,10 +164,11 @@ jobs:
           node-version: '18'
       
       - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: ${{ matrix.target }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          source $HOME/.cargo/env
+          rustup target add ${{ matrix.target }}
       
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -172,11 +178,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
       
+      - name: Build Next.js
+        run: npm run build
+      
+      - name: Install Tauri CLI
+        run: |
+          source $HOME/.cargo/env
+          cargo install tauri-cli --version "^1.0" --locked
+      
       - name: Build
         run: |
+          source $HOME/.cargo/env
           chmod +x setup_python_env_mac.sh
           ./setup_python_env_mac.sh
-          npm run build
           cd src-tauri
           cargo tauri build --target ${{ matrix.target }}
       
