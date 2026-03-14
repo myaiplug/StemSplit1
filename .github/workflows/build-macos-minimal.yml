@@ -1,0 +1,68 @@
+name: Build macOS (Minimal)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Setup Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source $HOME/.cargo/env
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
+      
+      - name: Install Node dependencies
+        run: npm install
+      
+      - name: Build Next.js
+        run: npm run build
+      
+      - name: List build output
+        run: |
+          echo "Checking Next.js output..."
+          ls -la out/ || echo "No 'out' directory"
+          ls -la .next/ || echo "No '.next' directory"
+      
+      - name: Build Tauri App
+        run: |
+          cd src-tauri
+          cargo build --release
+          cd ..
+      
+      - name: Check build artifacts
+        run: |
+          echo "Checking build artifacts..."
+          find src-tauri/target -name "*.app" -o -name "stem-split" | head -20
+      
+      - name: Create simple archive
+        if: success()
+        run: |
+          cd src-tauri/target/release
+          if [ -f "stem-split" ]; then
+            tar -czf ../../../StemSplit-mac.tar.gz stem-split
+            echo "✓ Created StemSplit-mac.tar.gz"
+          else
+            echo "❌ Binary not found"
+            exit 1
+          fi
+      
+      - name: Upload artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: StemSplit-macOS-simple
+          path: StemSplit-mac.tar.gz
