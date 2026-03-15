@@ -646,6 +646,246 @@ fn stop_vst_plugin() -> Result<String, String> {
     }
 }
 
+// ============================================================================
+// Python Environment Management
+// ============================================================================
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct PythonStatus {
+    pub installed: bool,
+    pub path: Option<String>,
+    pub version: Option<String>,
+    pub packages_installed: bool,
+    pub missing_packages: Vec<String>,
+}
+
+fn get_python_env_dir() -> std::path::PathBuf {
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            #[cfg(target_os = "windows")]
+            return exe_dir.join("embedded_python");
+            #[cfg(target_os = "macos")]
+            return exe_dir.join("../Resources/python_env");
+            #[cfg(target_os = "linux")]
+            return exe_dir.join("python_env");
+        }
+    }
+    std::path::PathBuf::from("python_env")
+}
+
+fn get_python_executable() -> Option<std::path::PathBuf> {
+    let env_dir = get_python_env_dir();
+    
+    #[cfg(target_os = "windows")]
+    let python_path = env_dir.join("python.exe");
+    #[cfg(not(target_os = "windows"))]
+    let python_path = env_dir.join("bin").join("python3");
+    
+    if python_path.exists() {
+        Some(python_path)
+    } else {
+        None
+    }
+}
+
+#[tauri::command]
+async fn check_python_status() -> Result<PythonStatus, String> {
+    let env_dir = get_python_env_dir();
+    let python_exe = get_python_executable();
+    
+    if let Some(ref exe) = python_exe {
+        // Check version
+        let mut cmd = Command::new(exe);
+        cmd.arg("--version");
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        
+        let version = cmd.output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string());
+        
+        // Check required packages
+        let required = vec!["torch", "demucs", "librosa", "soundfile", "pedalboard"];
+        let mut missing = Vec::new();
+        
+        for pkg in &required {
+            let mut check_cmd = Command::new(exe);
+            check_cmd.args(&["-c", &format!("import {}", pkg)]);
+            #[cfg(target_os = "windows")]
+            check_cmd.creation_flags(CREATE_NO_WINDOW);
+            
+            if !check_cmd.output().map(|o| o.status.success()).unwrap_or(false) {
+                missing.push(pkg.to_string());
+            }
+        }
+        
+        Ok(PythonStatus {
+            installed: true,
+            path: Some(exe.to_string_lossy().to_string()),
+            version,
+            packages_installed: missing.is_empty(),
+            missing_packages: missing,
+        })
+    } else {
+        Ok(PythonStatus {
+            installed: false,
+            path: None,
+            version: None,
+            packages_installed: false,
+            missing_packages: vec!["torch".into(), "demucs".into(), "librosa".into()],
+        })
+    }
+}
+
+#[tauri::command]
+async fn setup_python_environment(window: tauri::Window) -> Result<String, String> {
+    let env_dir = get_python_env_dir();
+    
+    // Create directory if needed
+    std::fs::create_dir_all(&env_dir).map_err(|e| format!("Failed to create directory: {}", e))?;
+    
+    // Emit progress
+    let emit_progress = |msg: &str, pct: u32| {
+        let _ = window.emit("python-setup-progress", serde_json::json!({
+            "message": msg,
+            "percent": pct
+        }));
+    };
+    
+    emit_progress("Starting Python environment setup...", 0);
+    
+    #[cfg(target_os = "windows")]
+    {
+        // Download Python embeddable
+        emit_progress("Downloading Python 3.10...", 5);
+        let python_url = "https://www.python.org/ftp/python/3.10.11/python-3.10.11-embed-amd64.zip";
+        let zip_path = env_dir.join("python.zip");
+        
+        download_file(python_url, &zip_path, &window, "python-setup-progress").await?;
+        
+        emit_progress("Extracting Python...", 30);
+        extract_zip(&zip_path, &env_dir)?;
+        std::fs::remove_file(&zip_path).ok();
+        
+        // Enable site-packages
+        let pth_file = env_dir.join("python310._pth");
+        if pth_file.exists() {
+            let content = std::fs::read_to_string(&pth_file).unwrap_or_default();
+            let new_content = content.replace("#import site", "import site");
+            std::fs::write(&pth_file, new_content).ok();
+        }
+        
+        // Install pip
+        emit_progress("Installing pip...", 35);
+        let getpip_url = "https://bootstrap.pypa.io/get-pip.py";
+        let getpip_path = env_dir.join("get-pip.py");
+        download_file(getpip_url, &getpip_path, &window, "python-setup-progress").await?;
+        
+        let python_exe = env_dir.join("python.exe");
+        let mut cmd = Command::new(&python_exe);
+        cmd.arg(&getpip_path).arg("--no-warn-script-location");
+        cmd.current_dir(&env_dir);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.output().map_err(|e| format!("Failed to install pip: {}", e))?;
+        std::fs::remove_file(&getpip_path).ok();
+        
+        // Install packages
+        emit_progress("Installing PyTorch (this takes a few minutes)...", 40);
+        install_package(&python_exe, "torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118")?;
+        
+        emit_progress("Installing Demucs...", 70);
+        install_package(&python_exe, "demucs")?;
+        
+        emit_progress("Installing audio libraries...", 85);
+        install_package(&python_exe, "librosa soundfile pedalboard pydub numpy resampy tqdm psutil pynvml sounddevice")?;
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        emit_progress("Downloading Python 3.10...", 5);
+        let python_url = "https://www.python.org/ftp/python/3.10.11/python-3.10.11-macos11.pkg";
+        
+        // For Mac, we use a standalone Python installation
+        // Create a virtual environment approach
+        emit_progress("Setting up Python environment...", 10);
+        
+        // Check if system python3 exists
+        let has_python = Command::new("python3").arg("--version").output().map(|o| o.status.success()).unwrap_or(false);
+        
+        if !has_python {
+            return Err("Python 3 not found. Please install Python from python.org first.".into());
+        }
+        
+        // Create venv in our app directory
+        let mut cmd = Command::new("python3");
+        cmd.args(&["-m", "venv", env_dir.to_str().unwrap()]);
+        cmd.output().map_err(|e| format!("Failed to create venv: {}", e))?;
+        
+        let pip_path = env_dir.join("bin").join("pip3");
+        
+        emit_progress("Installing PyTorch...", 30);
+        let mut cmd = Command::new(&pip_path);
+        cmd.args(&["install", "torch", "torchvision", "torchaudio"]);
+        cmd.output().map_err(|e| format!("Failed to install torch: {}", e))?;
+        
+        emit_progress("Installing Demucs...", 60);
+        let mut cmd = Command::new(&pip_path);
+        cmd.args(&["install", "demucs"]);
+        cmd.output().map_err(|e| format!("Failed to install demucs: {}", e))?;
+        
+        emit_progress("Installing audio libraries...", 80);
+        let mut cmd = Command::new(&pip_path);
+        cmd.args(&["install", "librosa", "soundfile", "pedalboard", "pydub", "numpy", "resampy", "tqdm", "psutil"]);
+        cmd.output().map_err(|e| format!("Failed to install packages: {}", e))?;
+    }
+    
+    emit_progress("Setup complete!", 100);
+    Ok("Python environment ready".into())
+}
+
+#[cfg(target_os = "windows")]
+fn install_package(python_exe: &std::path::Path, packages: &str) -> Result<(), String> {
+    let mut cmd = Command::new(python_exe);
+    cmd.args(&["-m", "pip", "install"]);
+    cmd.args(packages.split_whitespace());
+    cmd.arg("--no-warn-script-location");
+    cmd.arg("--no-cache-dir");
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd.output().map_err(|e| format!("Failed to install {}: {}", packages, e))?;
+    Ok(())
+}
+
+async fn download_file(url: &str, dest: &std::path::Path, _window: &tauri::Window, _event: &str) -> Result<(), String> {
+    // Simple blocking download - in production you'd want async with progress
+    let response = reqwest::blocking::get(url).map_err(|e| format!("Download failed: {}", e))?;
+    let bytes = response.bytes().map_err(|e| format!("Failed to read response: {}", e))?;
+    std::fs::write(dest, bytes).map_err(|e| format!("Failed to write file: {}", e))?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn extract_zip(zip_path: &std::path::Path, dest_dir: &std::path::Path) -> Result<(), String> {
+    let file = std::fs::File::open(zip_path).map_err(|e| format!("Failed to open zip: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Failed to read zip: {}", e))?;
+    
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| format!("Zip error: {}", e))?;
+        let outpath = dest_dir.join(file.name());
+        
+        if file.name().ends_with('/') {
+            std::fs::create_dir_all(&outpath).ok();
+        } else {
+            if let Some(p) = outpath.parent() {
+                std::fs::create_dir_all(p).ok();
+            }
+            let mut outfile = std::fs::File::create(&outpath).map_err(|e| format!("Failed to create file: {}", e))?;
+            std::io::copy(&mut file, &mut outfile).map_err(|e| format!("Failed to extract: {}", e))?;
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn health_check() -> Result<String, String> {
     Ok(serde_json::json!({
@@ -678,6 +918,8 @@ fn main() {
             apply_stem_fx,
             preview_vst_plugin,
             stop_vst_plugin,
+            check_python_status,
+            setup_python_environment,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

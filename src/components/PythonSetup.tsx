@@ -1,0 +1,208 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Download, CheckCircle, XCircle, Loader2, AlertCircle } from 'lucide-react';
+import { checkPythonStatus, setupPythonEnvironment, PythonStatus, PythonSetupProgress } from '@/lib/tauri-bridge';
+
+interface PythonSetupProps {
+  onReady: () => void;
+}
+
+export default function PythonSetup({ onReady }: PythonSetupProps) {
+  const [status, setStatus] = useState<PythonStatus | null>(null);
+  const [isChecking, setIsChecking] = useState(true);
+  const [isInstalling, setIsInstalling] = useState(false);
+  const [progress, setProgress] = useState<PythonSetupProgress | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    checkStatus();
+  }, []);
+
+  const checkStatus = async () => {
+    setIsChecking(true);
+    setError(null);
+    try {
+      const result = await checkPythonStatus();
+      setStatus(result);
+      
+      // If everything is ready, notify parent
+      if (result.installed && result.packages_installed) {
+        onReady();
+      }
+    } catch (err) {
+      setError('Failed to check Python status');
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
+  const handleInstall = async () => {
+    setIsInstalling(true);
+    setError(null);
+    setProgress({ message: 'Starting...', percent: 0 });
+
+    try {
+      await setupPythonEnvironment((prog) => {
+        setProgress(prog);
+      });
+      
+      // Re-check status after install
+      await checkStatus();
+    } catch (err: any) {
+      setError(err?.message || 'Installation failed');
+      setIsInstalling(false);
+    }
+  };
+
+  if (isChecking) {
+    return (
+      <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-zinc-900 border border-zinc-700 rounded-2xl p-8 max-w-md w-full mx-4"
+        >
+          <div className="flex items-center gap-3 mb-4">
+            <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+            <h2 className="text-xl font-semibold text-white">Checking System...</h2>
+          </div>
+          <p className="text-zinc-400">Verifying AI components are installed</p>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // If Python is ready, don't show anything
+  if (status?.installed && status?.packages_installed) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-zinc-900 border border-zinc-700 rounded-2xl p-8 max-w-lg w-full mx-4"
+      >
+        {/* Header */}
+        <div className="flex items-center gap-3 mb-6">
+          <div className="p-3 bg-blue-500/20 rounded-xl">
+            <Download className="w-6 h-6 text-blue-400" />
+          </div>
+          <div>
+            <h2 className="text-xl font-semibold text-white">Setup Required</h2>
+            <p className="text-zinc-400 text-sm">AI components need to be downloaded</p>
+          </div>
+        </div>
+
+        {/* Status Items */}
+        <div className="space-y-3 mb-6">
+          <StatusItem 
+            label="Python Environment" 
+            installed={status?.installed || false}
+            detail={status?.version}
+          />
+          <StatusItem 
+            label="PyTorch (AI Engine)" 
+            installed={status?.packages_installed && !status?.missing_packages.includes('torch')}
+          />
+          <StatusItem 
+            label="Demucs (Stem Separation)" 
+            installed={status?.packages_installed && !status?.missing_packages.includes('demucs')}
+          />
+          <StatusItem 
+            label="Audio Libraries" 
+            installed={status?.packages_installed && !status?.missing_packages.includes('librosa')}
+          />
+        </div>
+
+        {/* Progress Bar */}
+        {isInstalling && progress && (
+          <div className="mb-6">
+            <div className="flex justify-between text-sm mb-2">
+              <span className="text-zinc-400">{progress.message}</span>
+              <span className="text-blue-400">{progress.percent}%</span>
+            </div>
+            <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+              <motion.div
+                className="h-full bg-gradient-to-r from-blue-500 to-purple-500"
+                initial={{ width: 0 }}
+                animate={{ width: `${progress.percent}%` }}
+                transition={{ duration: 0.3 }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div className="flex items-center gap-2 p-3 bg-red-500/20 border border-red-500/30 rounded-lg mb-6">
+            <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
+            <p className="text-red-300 text-sm">{error}</p>
+          </div>
+        )}
+
+        {/* Info */}
+        <div className="bg-zinc-800/50 rounded-lg p-4 mb-6">
+          <p className="text-zinc-300 text-sm">
+            <strong>Download Size:</strong> ~2.7 GB
+          </p>
+          <p className="text-zinc-400 text-sm mt-1">
+            Includes PyTorch with GPU support and Demucs AI models for professional stem separation.
+          </p>
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-3">
+          <button
+            onClick={handleInstall}
+            disabled={isInstalling}
+            className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-medium rounded-xl transition-colors"
+          >
+            {isInstalling ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Installing...
+              </>
+            ) : (
+              <>
+                <Download className="w-5 h-5" />
+                Download & Install
+              </>
+            )}
+          </button>
+        </div>
+
+        <p className="text-zinc-500 text-xs text-center mt-4">
+          This only needs to be done once. Your internet connection is required.
+        </p>
+      </motion.div>
+    </div>
+  );
+}
+
+function StatusItem({ 
+  label, 
+  installed, 
+  detail 
+}: { 
+  label: string; 
+  installed: boolean;
+  detail?: string | null;
+}) {
+  return (
+    <div className="flex items-center justify-between p-3 bg-zinc-800/50 rounded-lg">
+      <span className="text-zinc-300">{label}</span>
+      <div className="flex items-center gap-2">
+        {detail && <span className="text-zinc-500 text-sm">{detail}</span>}
+        {installed ? (
+          <CheckCircle className="w-5 h-5 text-green-500" />
+        ) : (
+          <XCircle className="w-5 h-5 text-zinc-500" />
+        )}
+      </div>
+    </div>
+  );
+}

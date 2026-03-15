@@ -232,3 +232,83 @@ export async function openResultsFolder(path: string): Promise<void> {
     throw error;
   }
 }
+
+// ============================================================================
+// Python Environment Management
+// ============================================================================
+
+export interface PythonStatus {
+  installed: boolean;
+  path: string | null;
+  version: string | null;
+  packages_installed: boolean;
+  missing_packages: string[];
+}
+
+export interface PythonSetupProgress {
+  message: string;
+  percent: number;
+}
+
+/**
+ * Check if Python environment is ready for stem splitting
+ */
+export async function checkPythonStatus(): Promise<PythonStatus> {
+  try {
+    console.log('[IPC] Checking Python status...');
+    const result = await invoke<PythonStatus>('check_python_status');
+    console.log('[IPC] Python status:', result);
+    return result;
+  } catch (error) {
+    console.error('[IPC] Failed to check Python status:', error);
+    return {
+      installed: false,
+      path: null,
+      version: null,
+      packages_installed: false,
+      missing_packages: ['torch', 'demucs', 'librosa'],
+    };
+  }
+}
+
+/**
+ * Download and setup Python environment
+ * @param onProgress Callback for progress updates
+ */
+export async function setupPythonEnvironment(
+  onProgress?: (progress: PythonSetupProgress) => void
+): Promise<string> {
+  try {
+    console.log('[IPC] Starting Python environment setup...');
+    
+    // Set up progress listener
+    let unlisten: (() => void) | null = null;
+    if (onProgress) {
+      unlisten = await listen<PythonSetupProgress>('python-setup-progress', (event) => {
+        onProgress(event.payload);
+      });
+    }
+    
+    const result = await invoke<string>('setup_python_environment');
+    
+    if (unlisten) unlisten();
+    
+    console.log('[IPC] Python setup complete:', result);
+    return result;
+  } catch (error) {
+    console.error('[IPC] Python setup failed:', error);
+    throw error;
+  }
+}
+
+/**
+ * Listen for Python setup progress events
+ */
+export async function onPythonSetupProgress(
+  callback: (progress: PythonSetupProgress) => void
+): Promise<() => void> {
+  return await listen<PythonSetupProgress>('python-setup-progress', (event) => {
+    callback(event.payload);
+  });
+}
+
