@@ -16,7 +16,7 @@ if (-not (Test-Path $ISCC)) {
 
 # Step 1: Setup Embedded Python Environment
 Write-Host "[1/5] Setting up environment..." -ForegroundColor Yellow
-if (-not (Test-Path "python_embed\python.exe")) {
+if (-not (Test-Path "embedded_python\python.exe")) {
     Write-Host "Creating environment (this may take a few minutes)..." -ForegroundColor Yellow
     .\setup_embedded_python.ps1
     if ($LASTEXITCODE -ne 0) {

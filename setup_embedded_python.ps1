@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 $PYTHON_VERSION = "3.10.11"
 $PYTHON_URL = "https://www.python.org/ftp/python/$PYTHON_VERSION/python-$PYTHON_VERSION-embed-amd64.zip"
 $PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
-$EMBED_DIR = "python_embed"
+$EMBED_DIR = "embedded_python"
 
 Write-Host "Setting up Embedded Python Environment..." -ForegroundColor Cyan
 
