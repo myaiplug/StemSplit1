@@ -2965,9 +2965,9 @@ checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
 
 [[package]]
 name = "tauri"
-version = "1.6.0"
+version = "1.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0da520ff07c0745199204f7a7a62a8c6ee1666313b792b051ca170eca04649aa"
+checksum = "67c7177b6be45bbb875aa239578f5adc982a1b3d5ea5b315ccd100aeb0043374"
 dependencies = [
  "anyhow",
  "cocoa",
@@ -2977,10 +2977,11 @@ dependencies = [
  "encoding_rs",
  "flate2",
  "futures-util",
+ "getrandom 0.2.17",
  "glib",
  "glob",
  "gtk",
- "heck 0.4.1",
+ "heck 0.5.0",
  "http",
  "ignore",
  "objc",
