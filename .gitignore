@@ -6,6 +6,7 @@ embedded_python/
 .venv/
 venv/
 env/
+ffmpeg/
 
 # Next.js build outputs
 .next/

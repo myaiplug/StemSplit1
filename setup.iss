@@ -51,6 +51,9 @@ Source: "UVR\*"; DestDir: "{app}\UVR"; Flags: recursesubdirs createallsubdirs; E
 ; Trained Models (Large files)
 Source: "Stem Split Models\*"; DestDir: "{app}\Stem Split Models"; Flags: recursesubdirs createallsubdirs
 
+; FFmpeg for MP3 encoding
+Source: "ffmpeg\ffmpeg.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion skipifsourcedoesntexist
+
 ; Icons & Assets
 Source: "ss2.ico"; DestDir: "{app}"; Flags: ignoreversion
 

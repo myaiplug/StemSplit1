@@ -48,8 +48,42 @@ if ($LASTEXITCODE -ne 0) {
 cd ..
 Write-Host "✓ Application Ready" -ForegroundColor Green
 
-# Step 4: Download/verify models (optional - comment out if models are too large)
-Write-Host "`n[4/5] Verifying model files..." -ForegroundColor Yellow
+# Step 4: Download FFmpeg (required for MP3 encoding)
+Write-Host "`n[4/6] Setting up FFmpeg..." -ForegroundColor Yellow
+$FFMPEG_DIR = "ffmpeg"
+$FFMPEG_EXE = "$FFMPEG_DIR\ffmpeg.exe"
+if (-not (Test-Path $FFMPEG_EXE)) {
+    Write-Host "Downloading FFmpeg..." -ForegroundColor Yellow
+    $FFMPEG_URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+    $FFMPEG_ZIP = "ffmpeg_temp.zip"
+    
+    try {
+        Invoke-WebRequest -Uri $FFMPEG_URL -OutFile $FFMPEG_ZIP -UseBasicParsing
+        
+        # Extract only ffmpeg.exe from the bin folder
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($FFMPEG_ZIP)
+        $ffmpegEntry = $zip.Entries | Where-Object { $_.Name -eq "ffmpeg.exe" } | Select-Object -First 1
+        
+        if ($ffmpegEntry) {
+            if (-not (Test-Path $FFMPEG_DIR)) { New-Item -ItemType Directory -Path $FFMPEG_DIR | Out-Null }
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($ffmpegEntry, $FFMPEG_EXE, $true)
+            Write-Host "✓ FFmpeg downloaded" -ForegroundColor Green
+        } else {
+            Write-Warning "Could not find ffmpeg.exe in archive"
+        }
+        $zip.Dispose()
+        Remove-Item $FFMPEG_ZIP -ErrorAction SilentlyContinue
+    } catch {
+        Write-Warning "Failed to download FFmpeg: $_"
+        Write-Warning "MP3 encoding may not work without FFmpeg"
+    }
+} else {
+    Write-Host "✓ FFmpeg already exists" -ForegroundColor Green
+}
+
+# Step 5: Download/verify models (optional - comment out if models are too large)
+Write-Host "`n[5/6] Verifying model files..." -ForegroundColor Yellow
 if (Test-Path "Stem Split Models") {
     $modelCount = (Get-ChildItem "Stem Split Models" -Recurse -File).Count
     Write-Host "✓ Found $modelCount model files" -ForegroundColor Green
@@ -57,8 +91,8 @@ if (Test-Path "Stem Split Models") {
     Write-Warning "Stem Split Models folder not found. Models will need to be downloaded by user."
 }
 
-# Step 5: Create Installer
-Write-Host "`n[5/5] Creating installer..." -ForegroundColor Yellow
+# Step 6: Create Installer
+Write-Host "`n[6/6] Creating installer..." -ForegroundColor Yellow
 & $ISCC "setup.iss"
 
 if ($LASTEXITCODE -eq 0) {

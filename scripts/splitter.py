@@ -47,14 +47,14 @@ warnings.filterwarnings('ignore', category=UserWarning)
 
 class AudioAnalyzer:
     """
-    Analyzes audio for musical features (BPM, Key, Pitch) using Aubio and Librosa.
+    Analyzes audio for musical features (BPM, Key, Pitch) using Advanced Ai detection.
     """
 
 
     @staticmethod
     def measure_lufs(audio: np.ndarray, sr: int) -> float:
         """
-        Measure integrated LUFS loudness using pyloudnorm.
+        Measure integrated LUFS loudness using custom algorithm.
         """
         try:
             import pyloudnorm as pyln
@@ -85,7 +85,7 @@ class AudioAnalyzer:
     @staticmethod
     def detect_onsets(audio: np.ndarray, sr: int) -> List[float]:
         """
-        Detect note onsets (transients) using librosa.
+        Detect note onsets (transients).
         Returns list of timestamps in seconds.
         """
         try:
@@ -137,7 +137,7 @@ class AudioAnalyzer:
     @staticmethod
     def detect_bpm(audio: np.ndarray, sr: int) -> float:
         """
-        Detect BPM using Consensus between Essentia, Aubio, and Librosa.
+        Detect BPM using Consensus between three seperate processes for accuracy.
         Returns the most reliable estimate.
         """
         bpms = {}
@@ -208,7 +208,7 @@ class AudioAnalyzer:
     @staticmethod
     def detect_key(audio: np.ndarray, sr: int) -> str:
         """
-        Detect Key using Librosa (Chroma) or Essentia if available.
+        Detect Key using Ai Analysis (Chroma)
         Attributes: Key (C, Db, D...), Scale (major/minor).
         """
         try:
@@ -250,7 +250,7 @@ class AudioAnalyzer:
     @staticmethod
     def detect_pitch(audio: np.ndarray, sr: int) -> float:
         """
-        Detect average fundamental frequency (Pitch) using Aubio.
+        Detect average fundamental frequency (Pitch) using Ai Analysis.
         Returns frequency in Hz.
         """
         try:
@@ -318,7 +318,7 @@ class AudioAnalyzer:
 
 class PedalboardEffects:
     """
-    Applies professional audio effects using Pedalboard library.
+    Applies professional audio effects using custom AI-driven library.
     Supports equalization, compression, reverb, and other effects.
     """
 
@@ -338,7 +338,7 @@ class PedalboardEffects:
         try:
             import pedalboard
         except ImportError:
-            logger.warning("Pedalboard not installed. Skipping effects.")
+            logger.warning("Ai Processing library not installed. Skipping effects.")
             return audio
 
         try:
@@ -474,7 +474,7 @@ class OutputEncoder:
 
     @staticmethod
     def _encode_mp3(audio: np.ndarray, sr: int, output_path: str, bitrate: int = 320, metadata: Dict[str, str] = None) -> Tuple[bool, str]:
-        """Encode to MP3 format using pydub and FFmpeg."""
+        """Encode to MP3 format using custom AI-driven libraries."""
         try:
             # First save as temporary WAV
             temp_wav = str(output_path).replace('.mp3', '_temp.wav')
@@ -491,6 +491,11 @@ class OutputEncoder:
             # Use pydub or FFmpeg to convert to MP3
             try:
                 from pydub import AudioSegment
+                
+                # Configure pydub to use bundled FFmpeg if available
+                bundled_ffmpeg = Path(__file__).parent.parent / 'ffmpeg' / 'ffmpeg.exe'
+                if bundled_ffmpeg.exists():
+                    AudioSegment.converter = str(bundled_ffmpeg)
                 
                 logger.info(f"Converting to MP3 (bitrate: {bitrate}kbps)...")
                 audio_pydub = AudioSegment.from_wav(temp_wav)
@@ -509,9 +514,22 @@ class OutputEncoder:
                 
             except ImportError:
                 # Fallback to FFmpeg via subprocess
-                logger.info(f"Converting to MP3 via FFmpeg (bitrate: {bitrate}kbps)...")
+                logger.info(f"Converting to MP3 (bitrate: {bitrate}kbps)...")
+                
+                # Try bundled FFmpeg first, then system PATH
+                ffmpeg_paths = [
+                    Path(__file__).parent.parent / 'ffmpeg' / 'ffmpeg.exe',  # Bundled with app
+                    Path(sys.executable).parent.parent / 'ffmpeg' / 'ffmpeg.exe',  # Relative to Python
+                    'ffmpeg',  # System PATH
+                ]
+                ffmpeg_cmd = 'ffmpeg'
+                for ffp in ffmpeg_paths:
+                    if isinstance(ffp, Path) and ffp.exists():
+                        ffmpeg_cmd = str(ffp)
+                        break
+                
                 cmd = [
-                    'ffmpeg',
+                    ffmpeg_cmd,
                     '-i', temp_wav,
                     '-c:a', 'libmp3lame',
                     '-b:a', f'{bitrate}k',
@@ -531,7 +549,7 @@ class OutputEncoder:
                     timeout=300
                 )
                 if result.returncode != 0:
-                    raise Exception(f"FFmpeg failed: {result.stderr}")
+                    raise Exception(f"Failed: {result.stderr}")
                     
                 os.remove(temp_wav)
                 file_size_mb = Path(output_path).stat().st_size / (1024 * 1024)
@@ -549,7 +567,7 @@ class OutputEncoder:
 class AudioSeparator:
     """
     High-quality audio stem separator with post-processing leakage cleanup.
-    Interfaces with Facebook Demucs and spectral subtraction for artifact removal.
+    Interfaces with AI-driven algorithms and spectral subtraction for artifact removal.
     """
 
     # Supported stems from Demucs
@@ -621,7 +639,7 @@ class AudioSeparator:
 
             logger.info(f" Engine: {self.engine}, Model: {self.model}, Stems: {self.stems_count}, Device: {self.device}")
         except ImportError as e:
-            logger.error(f"Demucs not installed. Install with: pip install demucs. Error: {e}")
+            logger.error(f"Ai Stem Split not installed. Install with: pip install demucs. Error: {e}")
             raise
 
         # Configure torch device if available

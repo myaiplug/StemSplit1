@@ -52,6 +52,9 @@ Source: "Stem Split Models\*"; DestDir: "{app}\Stem Split Models"; Flags: recurs
 ; Requirements file for pip
 Source: "requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
 
+; FFmpeg for MP3 encoding
+Source: "ffmpeg\\ffmpeg.exe"; DestDir: "{app}\\ffmpeg"; Flags: ignoreversion skipifsourcedoesntexist
+
 ; Icons
 Source: "ss2.ico"; DestDir: "{app}"; Flags: ignoreversion
 
