@@ -8,6 +8,17 @@ PYTHON_VERSION="3.10"
 ENV_DIR="python_env"
 
 echo "Setting up Python Environment for macOS..."
+echo ""
+
+# Check FFmpeg
+echo "Checking dependencies..."
+if ! command -v ffmpeg &> /dev/null; then
+    echo "⚠️  FFmpeg not found. Install with: brew install ffmpeg"
+    echo "   MP3 export may not work without FFmpeg."
+else
+    echo "✓ FFmpeg found: $(ffmpeg -version 2>&1 | head -1)"
+fi
+echo ""
 
 # Check Python version
 if ! command -v python3 &> /dev/null; then

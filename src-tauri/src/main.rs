@@ -798,46 +798,66 @@ async fn setup_python_environment(window: tauri::Window) -> Result<String, Strin
         install_package(&python_exe, "demucs")?;
         
         emit_progress("Installing audio libraries...", 85);
-        install_package(&python_exe, "librosa soundfile pedalboard pydub numpy resampy tqdm psutil pynvml sounddevice")?;
+        install_package(&python_exe, "librosa soundfile pedalboard pydub numpy resampy tqdm psutil pynvml sounddevice pyloudnorm")?;
     }
     
     #[cfg(target_os = "macos")]
     {
-        emit_progress("Downloading Python 3.10...", 5);
-        let python_url = "https://www.python.org/ftp/python/3.10.11/python-3.10.11-macos11.pkg";
-        
-        // For Mac, we use a standalone Python installation
-        // Create a virtual environment approach
-        emit_progress("Setting up Python environment...", 10);
+        emit_progress("Setting up Python environment...", 5);
         
         // Check if system python3 exists
         let has_python = Command::new("python3").arg("--version").output().map(|o| o.status.success()).unwrap_or(false);
         
         if !has_python {
-            return Err("Python 3 not found. Please install Python from python.org first.".into());
+            return Err("Python 3 not found. Please install Python from python.org or via Homebrew: brew install python@3.10".into());
+        }
+        
+        // Check if FFmpeg is available
+        let has_ffmpeg = Command::new("ffmpeg").arg("-version").output().map(|o| o.status.success()).unwrap_or(false);
+        if !has_ffmpeg {
+            emit_progress("Note: FFmpeg not found. Install via: brew install ffmpeg", 8);
         }
         
         // Create venv in our app directory
+        emit_progress("Creating virtual environment...", 10);
         let mut cmd = Command::new("python3");
         cmd.args(&["-m", "venv", env_dir.to_str().unwrap()]);
-        cmd.output().map_err(|e| format!("Failed to create venv: {}", e))?;
+        let result = cmd.output().map_err(|e| format!("Failed to create venv: {}", e))?;
+        if !result.status.success() {
+            return Err("Failed to create Python virtual environment".into());
+        }
         
         let pip_path = env_dir.join("bin").join("pip3");
         
-        emit_progress("Installing PyTorch...", 30);
+        // Upgrade pip first
+        emit_progress("Upgrading pip...", 15);
+        let mut cmd = Command::new(&pip_path);
+        cmd.args(&["install", "--upgrade", "pip", "setuptools", "wheel"]);
+        cmd.output().ok();
+        
+        emit_progress("Installing PyTorch (this may take several minutes)...", 20);
         let mut cmd = Command::new(&pip_path);
         cmd.args(&["install", "torch", "torchvision", "torchaudio"]);
-        cmd.output().map_err(|e| format!("Failed to install torch: {}", e))?;
+        let result = cmd.output().map_err(|e| format!("Failed to install torch: {}", e))?;
+        if !result.status.success() {
+            return Err(format!("PyTorch installation failed: {}", String::from_utf8_lossy(&result.stderr)));
+        }
         
-        emit_progress("Installing Demucs...", 60);
+        emit_progress("Installing Demucs...", 50);
         let mut cmd = Command::new(&pip_path);
         cmd.args(&["install", "demucs"]);
-        cmd.output().map_err(|e| format!("Failed to install demucs: {}", e))?;
+        let result = cmd.output().map_err(|e| format!("Failed to install demucs: {}", e))?;
+        if !result.status.success() {
+            return Err(format!("Demucs installation failed: {}", String::from_utf8_lossy(&result.stderr)));
+        }
         
-        emit_progress("Installing audio libraries...", 80);
+        emit_progress("Installing audio libraries...", 75);
         let mut cmd = Command::new(&pip_path);
-        cmd.args(&["install", "librosa", "soundfile", "pedalboard", "pydub", "numpy", "resampy", "tqdm", "psutil"]);
-        cmd.output().map_err(|e| format!("Failed to install packages: {}", e))?;
+        cmd.args(&["install", "librosa", "soundfile", "pedalboard", "pydub", "numpy", "resampy", "tqdm", "psutil", "pyloudnorm", "sounddevice"]);
+        let result = cmd.output().map_err(|e| format!("Failed to install packages: {}", e))?;
+        if !result.status.success() {
+            return Err(format!("Package installation failed: {}", String::from_utf8_lossy(&result.stderr)));
+        }
     }
     
     emit_progress("Setup complete!", 100);
