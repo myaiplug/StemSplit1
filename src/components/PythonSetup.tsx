@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect, useCallback } from 'react';
+import { motion } from 'framer-motion';
 import { Download, CheckCircle, XCircle, Loader2, AlertCircle } from 'lucide-react';
 import { checkPythonStatus, setupPythonEnvironment, PythonStatus, PythonSetupProgress } from '@/lib/tauri-bridge';
 
@@ -16,11 +16,7 @@ export default function PythonSetup({ onReady }: PythonSetupProps) {
   const [progress, setProgress] = useState<PythonSetupProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    checkStatus();
-  }, []);
-
-  const checkStatus = async () => {
+  const checkStatus = useCallback(async () => {
     setIsChecking(true);
     setError(null);
     try {
@@ -36,7 +32,11 @@ export default function PythonSetup({ onReady }: PythonSetupProps) {
     } finally {
       setIsChecking(false);
     }
-  };
+  }, [onReady]);
+
+  useEffect(() => {
+    checkStatus();
+  }, [checkStatus]);
 
   const handleInstall = async () => {
     setIsInstalling(true);
@@ -101,20 +101,20 @@ export default function PythonSetup({ onReady }: PythonSetupProps) {
         <div className="space-y-3 mb-6">
           <StatusItem 
             label="Python Environment" 
-            installed={status?.installed || false}
+            installed={status?.installed ?? false}
             detail={status?.version}
           />
           <StatusItem 
             label="PyTorch (AI Engine)" 
-            installed={status?.packages_installed && !status?.missing_packages.includes('torch')}
+            installed={(status?.packages_installed && !status?.missing_packages.includes('torch')) ?? false}
           />
           <StatusItem 
             label="Demucs (Stem Separation)" 
-            installed={status?.packages_installed && !status?.missing_packages.includes('demucs')}
+            installed={(status?.packages_installed && !status?.missing_packages.includes('demucs')) ?? false}
           />
           <StatusItem 
             label="Audio Libraries" 
-            installed={status?.packages_installed && !status?.missing_packages.includes('librosa')}
+            installed={(status?.packages_installed && !status?.missing_packages.includes('librosa')) ?? false}
           />
         </div>
 
