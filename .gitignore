@@ -9,6 +9,15 @@ env/
 ffmpeg/
 _TO_REMOVE/
 
+# Environment files (NEVER commit real secrets)
+.env
+.env.local
+.env.production
+
+# Personal/Private files
+public/sounds/GORDON_MASTER/
+*.code-workspace
+
 # Next.js build outputs
 .next/
 out/
