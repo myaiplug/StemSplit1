@@ -11,8 +11,6 @@ import {
   onStemSplitProgress,
   ProgressEvent,
   SeparationResult,
-  SeparationFailureError,
-  SupportAssetRemediation,
 } from '../lib/tauri-bridge';
 
 /**
@@ -34,7 +32,6 @@ export interface UseStemSplitState {
   progress: ProgressEvent | null;
   result: SeparationResult | null;
   error: Error | null;
-  remediation: SupportAssetRemediation | null;
   isProcessing: boolean;
 }
 
@@ -67,7 +64,6 @@ export function useStemSplit(): UseStemSplitReturn {
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [result, setResult] = useState<SeparationResult | null>(null);
   const [error, setError] = useState<Error | null>(null);
-  const [remediation, setRemediation] = useState<SupportAssetRemediation | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
 
   /**
@@ -107,7 +103,6 @@ export function useStemSplit(): UseStemSplitReturn {
         setError(null);
         setResult(null);
         setProgress(null);
-        setRemediation(null);
         setStatus(StemSplitStatus.PROCESSING);
 
         // Set up progress listener
@@ -121,11 +116,6 @@ export function useStemSplit(): UseStemSplitReturn {
         console.log('[useStemSplit] Separation completed successfully', separationResult);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
-        if (err instanceof SeparationFailureError) {
-          setRemediation(err.manifest.remediation ?? null);
-        } else {
-          setRemediation(null);
-        }
         setError(error);
         setStatus(StemSplitStatus.ERROR);
         console.error('[useStemSplit] Separation failed:', error);
@@ -166,7 +156,6 @@ export function useStemSplit(): UseStemSplitReturn {
     setProgress(null);
     setResult(null);
     setError(null);
-    setRemediation(null);
 
     if (unlistenRef.current) {
       unlistenRef.current();
@@ -179,7 +168,6 @@ export function useStemSplit(): UseStemSplitReturn {
     progress,
     result,
     error,
-    remediation,
     isProcessing: status === StemSplitStatus.PROCESSING,
     startSeparation,
     cancel,

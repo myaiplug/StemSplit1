@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 // Dynamically import components to avoid SSR issues with Tauri APIs
 const ReactorZone = dynamic(
@@ -16,15 +16,10 @@ const PythonSetup = dynamic(
 
 export default function Home() {
   const [isPythonReady, setIsPythonReady] = useState(false);
-  const [isTauri, setIsTauri] = useState(false);
-
-  useEffect(() => {
-    setIsTauri(typeof window !== 'undefined' && '__TAURI__' in window);
-  }, []);
 
   return (
     <main>
-      {isTauri && <PythonSetup onReady={() => setIsPythonReady(true)} />}
+      <PythonSetup onReady={() => setIsPythonReady(true)} />
       <ReactorZone />
     </main>
   );

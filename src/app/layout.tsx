@@ -2,7 +2,6 @@ import React from 'react';
 import type { Metadata } from 'next';
 import { JetBrains_Mono, Rajdhani, Manrope, Syncopate } from 'next/font/google';
 import './globals.css';
-import { Providers } from './providers';
 
 const jetbrainsMono = JetBrains_Mono({ 
   subsets: ['latin'],
@@ -44,9 +43,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${jetbrainsMono.variable} ${rajdhani.variable} ${manrope.variable} ${syncopate.variable}`}>
        <body className="font-mono bg-slate-950 text-slate-200 antialiased overflow-hidden">
-        <Providers>
-          {children}
-        </Providers>
+        {children}
       </body>
     </html>
   );

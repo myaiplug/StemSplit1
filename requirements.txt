@@ -1,35 +1,14 @@
-# StemSplit Requirements - ALL dependencies for stem separation
-# Python 3.10.x required
-
-# PyTorch - MUST be installed first with CUDA support for GPU acceleration
-# CPU-only version for smaller installer (GPU users can upgrade manually)
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.1.0+cpu
-torchaudio==2.1.0+cpu
-
-# Core AI Separation Engines
-demucs>=4.0.0
-spleeter>=2.4.0
-
-# Audio Processing
-librosa>=0.10.0
-soundfile>=0.12.0
-numpy>=1.24.0,<2.0.0
-resampy>=0.4.0
-pydub>=0.25.1
-pyloudnorm>=0.1.0
-sounddevice>=0.4.6
-
-# Effects Processing
+torch
+torchaudio
+demucs
+librosa
+pynvml
+psutil
+soundfile
+numpy
+resampy
+tqdm
 pedalboard>=0.8.0
-
-# System/Hardware Detection
-pynvml>=11.0.0
-psutil>=5.9.0
-
-# Progress/Utilities
-tqdm>=4.65.0
-
-# Required for some models
-onnxruntime>=1.15.0
-requests>=2.31.0
+pydub>=0.25.1
+sounddevice
+pyloudnorm
