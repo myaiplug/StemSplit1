@@ -17,6 +17,29 @@ Professional AI-powered audio stem separation tool.
 
 ---
 
+## Free Trial and Upgrade
+
+StemSplit is free to download and includes a trial mode out of the box.
+
+Flow:
+1. Download and install StemSplit.
+2. Launch app and use trial mode immediately.
+3. Upgrade in-app when you want full features.
+4. Enter your license key to unlock Pro features.
+
+Trial vs Pro:
+
+| Feature | Trial (Free) | Pro (Paid) |
+|---|---|---|
+| Max file length | Up to 3 minutes | Unlimited |
+| Stem modes | 2-stem (vocals + instrumental) | Full stem set |
+| Output format | MP3 | WAV + MP3 |
+| Separation engines | Spleeter | All available engines |
+| Batch processing | No | Yes |
+| FX and VST tools | No | Yes |
+
+---
+
 ## 🚀 Installation
 
 ### Windows Installation

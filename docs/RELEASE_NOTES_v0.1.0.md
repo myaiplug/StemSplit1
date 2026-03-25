@@ -1,7 +1,7 @@
 # StemSplit v0.1.0
 
 Release date: 2026-03-25
-Commit: `e2aa59b`
+Commit: `fccb58e`
 
 ## Highlights
 
@@ -42,6 +42,20 @@ Commit: `e2aa59b`
 - `installers/release-preflight.local.json` (`PASS`)
 
 For release publication, prefer CI-generated artifacts/reports for both Windows and macOS.
+
+## Free Trial and Upgrade
+
+StemSplit v0.1.0 is free to download and install on both platforms.
+
+Licensing flow:
+1. Install and launch StemSplit.
+2. Use trial mode immediately.
+3. Upgrade in-app when you need full features.
+4. Enter your license key to unlock Pro mode.
+
+Trial vs Pro summary:
+- Trial: up to 3-minute files, 2-stem separation, MP3 output, limited engine/tooling.
+- Pro: unlimited duration, full stem options, high-quality output formats, all engines and pro tooling.
 
 ## Notes
 

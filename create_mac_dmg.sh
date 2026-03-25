@@ -9,6 +9,18 @@ APP_BUNDLE="src-tauri/target/release/bundle/macos/${APP_NAME}.app"
 DMG_NAME="${APP_NAME}.dmg"
 OUTPUT_DIR="installers"
 VOLUME_NAME="${APP_NAME} Installer"
+MAC_CODESIGN_IDENTITY="${MAC_CODESIGN_IDENTITY:-}"
+
+find_default_codesign_identity() {
+    security find-identity -v -p codesigning 2>/dev/null \
+        | grep "Developer ID Application" \
+        | head -1 \
+        | sed -E 's/.*"([^"]+)".*/\1/'
+}
+
+if [ -z "$MAC_CODESIGN_IDENTITY" ]; then
+    MAC_CODESIGN_IDENTITY="$(find_default_codesign_identity || true)"
+fi
 
 echo "Creating DMG installer for ${APP_NAME}..."
 
@@ -34,6 +46,12 @@ trap "rm -rf $TEMP_DIR" EXIT
 
 echo "Copying app bundle to temporary directory..."
 cp -R "$APP_BUNDLE" "$TEMP_DIR/"
+
+if [ -n "$MAC_CODESIGN_IDENTITY" ]; then
+    echo "Signing app bundle with identity: $MAC_CODESIGN_IDENTITY"
+    codesign --force --deep --options runtime --sign "$MAC_CODESIGN_IDENTITY" "$TEMP_DIR/${APP_NAME}.app"
+    codesign --verify --deep --strict --verbose=2 "$TEMP_DIR/${APP_NAME}.app"
+fi
 
 # Create Applications symlink
 echo "Creating Applications symlink..."
@@ -92,14 +110,10 @@ hdiutil convert "temp.dmg" -format UDZO -imagekey zlib-level=9 -o "${OUTPUT_DIR}
 # Clean up
 rm -f temp.dmg
 
-# Sign the DMG if a signing identity is available (optional)
-if command -v codesign &> /dev/null; then
-    # Check for signing identities
-    IDENTITIES=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 || true)
-    if [ -n "$IDENTITIES" ]; then
-        echo "Signing DMG..."
-        codesign --sign "Developer ID Application" "${OUTPUT_DIR}/${DMG_NAME}" 2>/dev/null || echo "Warning: Could not sign DMG (continuing anyway)"
-    fi
+if [ -n "$MAC_CODESIGN_IDENTITY" ]; then
+    echo "Signing DMG..."
+    codesign --force --sign "$MAC_CODESIGN_IDENTITY" "${OUTPUT_DIR}/${DMG_NAME}"
+    codesign --verify --verbose=2 "${OUTPUT_DIR}/${DMG_NAME}"
 fi
 
 echo ""

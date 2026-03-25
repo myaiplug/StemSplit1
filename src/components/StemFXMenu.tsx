@@ -3,9 +3,6 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { invoke, convertFileSrc } from '@tauri-apps/api/tauri';
-import { listen } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/api/dialog';
 import { 
   Activity, 
   Gauge, 
@@ -554,6 +551,9 @@ const StemFXMenu: React.FC<StemFXMenuProps> = ({ stemType, stemFilePath, isOpen,
     useEffect(() => {
         let unlisten: (() => void) | undefined;
         const setup = async () => {
+             const tauriActive = typeof window !== 'undefined' && '__TAURI__' in window;
+             if (!tauriActive) return;
+             const { listen } = await import('@tauri-apps/api/event');
              unlisten = await listen('vst-state-update', (event) => {
                  const state = event.payload as string;
                  setLoadedVSTs(prev => prev.map(v => {
@@ -573,6 +573,7 @@ const StemFXMenu: React.FC<StemFXMenuProps> = ({ stemType, stemFilePath, isOpen,
         if (previewingVstId === vst.id) {
             setStatusMsg("Stopping VST...");
             try {
+                const { invoke } = await import('@tauri-apps/api/tauri');
                 await invoke('stop_vst_plugin');
             } catch(e) {
                 console.error("Failed to stop:", e);
@@ -586,6 +587,7 @@ const StemFXMenu: React.FC<StemFXMenuProps> = ({ stemType, stemFilePath, isOpen,
         setPreviewingVstId(vst.id);
         setStatusMsg(`Opening ${vst.name}...`);
         try {
+            const { invoke } = await import('@tauri-apps/api/tauri');
             await invoke('preview_vst_plugin', { vstPath: vst.path, audioPath: stemFilePath });
             setStatusMsg('VST Closed.');
         } catch(e) {
@@ -728,6 +730,7 @@ const StemFXMenu: React.FC<StemFXMenuProps> = ({ stemType, stemFilePath, isOpen,
                  // Use Base64 to avoid command-line quoting issues on Windows
                  const fxBase64 = typeof window !== 'undefined' ? window.btoa(fxJson) : Buffer.from(fxJson).toString('base64');
                  
+                 const { invoke } = await import('@tauri-apps/api/tauri');
                  result = await invoke<string>('apply_stem_fx', {
                     stemPath: stemFilePath,
                     fxJson: fxBase64

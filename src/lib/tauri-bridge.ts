@@ -27,6 +27,7 @@ export interface SeparationResult {
   stems: Record<string, StemInfo>;
   process_duration_seconds: number;
   errors: string[];
+  remediation?: SupportAssetRemediation | null;
 }
 
 export interface StemInfo {
@@ -34,6 +35,64 @@ export interface StemInfo {
   format: string;
   duration_seconds: number;
   purity_score?: number;
+}
+
+export interface SupportAssetRemediation {
+  kind: 'support_asset';
+  asset_name: string;
+  download_url: string;
+  relative_destination: string;
+  checksum?: string | null;
+  message: string;
+}
+
+export interface SeparationFailureManifest {
+  status: string;
+  output_directory: string;
+  errors: string[];
+  remediation?: SupportAssetRemediation | null;
+}
+
+export interface SupportAssetInstallResult {
+  asset_name: string;
+  installed_to: string;
+}
+
+export class SeparationFailureError extends Error {
+  manifest: SeparationFailureManifest;
+
+  constructor(manifest: SeparationFailureManifest) {
+    super(manifest.errors?.[0] || manifest.remediation?.message || 'Separation failed');
+    this.name = 'SeparationFailureError';
+    this.manifest = manifest;
+  }
+}
+
+function parseSeparationFailure(error: unknown): SeparationFailureManifest | null {
+  const rawMessage =
+    typeof error === 'string'
+      ? error
+      : error instanceof Error
+        ? error.message
+        : String(error);
+
+  const jsonStart = rawMessage.indexOf('{');
+  const jsonEnd = rawMessage.lastIndexOf('}');
+
+  if (jsonStart === -1 || jsonEnd <= jsonStart) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawMessage.slice(jsonStart, jsonEnd + 1)) as SeparationFailureManifest;
+    if (parsed && Array.isArray(parsed.errors)) {
+      return parsed;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 /**
@@ -89,6 +148,10 @@ export async function startStemSplit(
     return result;
   } catch (error) {
     console.error('[IPC] Error in execute_splice:', error);
+    const manifest = parseSeparationFailure(error);
+    if (manifest) {
+      throw new SeparationFailureError(manifest);
+    }
     throw error;
   }
 }
@@ -250,6 +313,21 @@ export interface PythonSetupProgress {
   percent: number;
 }
 
+export interface SystemProfile {
+  os: string;
+  arch: string;
+  has_nvidia: boolean;
+  has_apple_silicon: boolean;
+  recommended_payload: string;
+}
+
+export interface DownloadProgress {
+  url: string;
+  downloaded: number;
+  total: number;
+  percentage: number;
+}
+
 /**
  * Check if Python environment is ready for stem splitting
  */
@@ -312,3 +390,266 @@ export async function onPythonSetupProgress(
   });
 }
 
+export async function getSystemProfile(): Promise<SystemProfile> {
+  try {
+    return await invoke<SystemProfile>('get_system_profile');
+  } catch (error) {
+    console.error('[IPC] Failed to get system profile:', error);
+    throw error;
+  }
+}
+
+export async function downloadFile(
+  url: string,
+  destination: string,
+  checksum?: string
+): Promise<string> {
+  try {
+    return await invoke<string>('download_file', { url, destination, checksum });
+  } catch (error) {
+    console.error('[IPC] Download failed:', error);
+    throw error;
+  }
+}
+
+export async function installSupportAsset(
+  remediation: SupportAssetRemediation,
+  onProgress?: (progress: DownloadProgress) => void
+): Promise<SupportAssetInstallResult> {
+  let unlisten: (() => void) | null = null;
+
+  try {
+    if (onProgress) {
+      unlisten = await listen<DownloadProgress>('support-asset-download-progress', (event) => {
+        onProgress(event.payload);
+      });
+    }
+
+    return await invoke<SupportAssetInstallResult>('install_support_asset', {
+      request: {
+        asset_name: remediation.asset_name,
+        download_url: remediation.download_url,
+        relative_destination: remediation.relative_destination,
+        checksum: remediation.checksum ?? null,
+      },
+    });
+  } catch (error) {
+    console.error('[IPC] Support asset install failed:', error);
+    throw error;
+  } finally {
+    if (unlisten) {
+      unlisten();
+    }
+  }
+}
+
+export async function onDownloadProgress(
+  callback: (progress: DownloadProgress) => void
+): Promise<() => void> {
+  return await listen<DownloadProgress>('download-progress', (event) => {
+    callback(event.payload);
+  });
+}
+
+// ============================================================================
+// License System
+// ============================================================================
+
+/**
+ * Trial limitations for free tier
+ */
+export interface TrialLimitations {
+  max_duration_seconds: number;   // 180 = 3 minutes max
+  allowed_stems: string[];        // ["vocals", "instrumental"]
+  output_format: string;          // "mp3" only for trial
+  engine: string;                 // "spleeter" for trial
+  batch_allowed: boolean;
+  fx_allowed: boolean;
+  vst_allowed: boolean;
+  high_quality_preview: boolean;
+}
+
+/**
+ * License information returned from backend
+ */
+export interface LicenseInfo {
+  is_valid: boolean;
+  is_trial: boolean;
+  email: string | null;
+  purchase_date: string | null;
+  license_key: string | null;    // Masked for display
+  features: string[];
+  limitations: TrialLimitations;
+  error: string | null;
+}
+
+export interface TrialCooldownStatus {
+  is_trial: boolean;
+  completed_splits: number;
+  cooldown_active: boolean;
+  remaining_seconds: number;
+  current_cooldown_minutes: number;
+  next_cooldown_minutes: number;
+}
+
+export interface SecurityWebhookDispatchResult {
+  success: boolean;
+  queued_for_retry: boolean;
+  message: string;
+}
+
+/**
+ * Get current license status
+ */
+export async function getLicenseStatus(): Promise<LicenseInfo> {
+  try {
+    console.log('[IPC] Getting license status...');
+    const result = await invoke<LicenseInfo>('get_license_status');
+    console.log('[IPC] License status:', result);
+    return result;
+  } catch (error) {
+    console.error('[IPC] Error getting license status:', error);
+    // Return trial tier as fallback
+    return {
+      is_valid: false,
+      is_trial: true,
+      email: null,
+      purchase_date: null,
+      license_key: null,
+      features: ['2-stem separation (vocals + instrumental)', 'Files under 3 minutes', 'MP3 output only', 'Spleeter engine only'],
+      limitations: {
+        max_duration_seconds: 180,
+        allowed_stems: ['vocals', 'instrumental'],
+        output_format: 'mp3',
+        engine: 'spleeter',
+        batch_allowed: false,
+        fx_allowed: false,
+        vst_allowed: false,
+        high_quality_preview: true,
+      },
+      error: String(error),
+    };
+  }
+}
+
+/**
+ * Activate a license key with email verification
+ */
+export async function activateLicense(licenseKey: string, email: string): Promise<LicenseInfo> {
+  try {
+    console.log('[IPC] Activating license...');
+    const result = await invoke<LicenseInfo>('activate_license', { licenseKey, email });
+    console.log('[IPC] License activation result:', result);
+    return result;
+  } catch (error) {
+    console.error('[IPC] Error activating license:', error);
+    return {
+      is_valid: false,
+      is_trial: true,
+      email: email,
+      purchase_date: null,
+      license_key: null,
+      features: ['2-stem separation (vocals + instrumental)', 'Files under 3 minutes', 'MP3 output only', 'Spleeter engine only'],
+      limitations: {
+        max_duration_seconds: 180,
+        allowed_stems: ['vocals', 'instrumental'],
+        output_format: 'mp3',
+        engine: 'spleeter',
+        batch_allowed: false,
+        fx_allowed: false,
+        vst_allowed: false,
+        high_quality_preview: true,
+      },
+      error: String(error),
+    };
+  }
+}
+
+/**
+ * Deactivate current license (return to trial)
+ */
+export async function deactivateLicense(): Promise<LicenseInfo> {
+  try {
+    console.log('[IPC] Deactivating license...');
+    const result = await invoke<LicenseInfo>('deactivate_license');
+    console.log('[IPC] License deactivated:', result);
+    return result;
+  } catch (error) {
+    console.error('[IPC] Error deactivating license:', error);
+    return {
+      is_valid: false,
+      is_trial: true,
+      email: null,
+      purchase_date: null,
+      license_key: null,
+      features: ['2-stem separation (vocals + instrumental)', 'Files under 3 minutes', 'MP3 output only', 'Spleeter engine only'],
+      limitations: {
+        max_duration_seconds: 180,
+        allowed_stems: ['vocals', 'instrumental'],
+        output_format: 'mp3',
+        engine: 'spleeter',
+        batch_allowed: false,
+        fx_allowed: false,
+        vst_allowed: false,
+        high_quality_preview: true,
+      },
+      error: String(error),
+    };
+  }
+}
+
+export async function getTrialCooldownStatus(): Promise<TrialCooldownStatus> {
+  try {
+    return await invoke<TrialCooldownStatus>('get_trial_cooldown_status');
+  } catch (error) {
+    console.error('[IPC] Failed to fetch trial cooldown status:', error);
+    return {
+      is_trial: true,
+      completed_splits: 0,
+      cooldown_active: false,
+      remaining_seconds: 0,
+      current_cooldown_minutes: 0,
+      next_cooldown_minutes: 15,
+    };
+  }
+}
+
+export async function testSecurityWebhook(): Promise<SecurityWebhookDispatchResult> {
+  try {
+    return await invoke<SecurityWebhookDispatchResult>('test_security_webhook');
+  } catch (error) {
+    return {
+      success: false,
+      queued_for_retry: false,
+      message: String(error),
+    };
+  }
+}
+
+/**
+ * Check if current license includes a specific feature
+ */
+export function hasFeature(license: LicenseInfo, feature: string): boolean {
+  return license.features.some(f => f.toLowerCase().includes(feature.toLowerCase()));
+}
+
+/**
+ * Check if license is full/paid (not trial)
+ */
+export function isPro(license: LicenseInfo): boolean {
+  return license.is_valid && !license.is_trial;
+}
+
+/**
+ * Check if license is trial/free
+ */
+export function isTrial(license: LicenseInfo): boolean {
+  return license.is_trial;
+}
+
+/**
+ * For backwards compatibility - enterprise is same as pro now (single paid tier)
+ */
+export function isEnterprise(license: LicenseInfo): boolean {
+  return license.is_valid && !license.is_trial;
+}

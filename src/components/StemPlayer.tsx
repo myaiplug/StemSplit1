@@ -3,9 +3,11 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { convertFileSrc } from '@tauri-apps/api/tauri';
 import WaveSurfer from 'wavesurfer.js';
 import StemFXMenu from './StemFXMenu';
+
+// Global state for solo sync across instances
+const activeSolos = new Set<string>();
 
 // --- Types ---
 type StemType = 'vocals' | 'drums' | 'bass' | 'other' | 'piano' | 'guitar' | 'kick' | 'snare' | 'toms' | 'cymbals' | 'instrumental';
@@ -87,14 +89,21 @@ const StemPlayer: React.FC<StemPlayerProps> = ({ stemName, filePath, duration, p
         let blobUrl: string | null = null;
 
         const initWaveSurfer = async () => {
-            // Use asset protocol for instant loading (Direct disk stream)
-            // DO NOT use readBinaryFile (IPC bridge is too slow for large audio)
-            let audioUrl = convertFileSrc(currentFilePath);
+            // Check if we are running in Tauri or Web
+            const tauriActive = typeof window !== 'undefined' && '__TAURI__' in window;
+            
+            // Use asset protocol for instant loading (Direct disk stream) or simple fetch for web
+            let audioUrl = currentFilePath;
+            if (tauriActive) {
+                const { convertFileSrc } = await import('@tauri-apps/api/tauri');
+                audioUrl = convertFileSrc(currentFilePath);
+            }
 
             if (cancelled || !waveRef.current) return;
 
             const ws = WaveSurfer.create({
                 container: waveRef.current,
+                url: audioUrl,
                 height: 48,
                 waveColor: colors.wave,
                 progressColor: colors.progress,
@@ -145,6 +154,8 @@ const StemPlayer: React.FC<StemPlayerProps> = ({ stemName, filePath, duration, p
                 if (!cancelled) {
                     setSelectionStart(null);
                     setSelectionEnd(null);
+                    const time = ws.getCurrentTime();
+                    window.dispatchEvent(new CustomEvent('stemsplit:seek', { detail: { sourceId: stemName, time } }));
                 }
             });
 
@@ -172,41 +183,127 @@ const StemPlayer: React.FC<StemPlayerProps> = ({ stemName, filePath, duration, p
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentFilePath]); // Updated dependency
 
+    // Global event sync for Solo, Play, Pause, etc.
+    const [globalSoloUpdate, setGlobalSoloUpdate] = useState(0);
+
+    useEffect(() => {
+        const handlePlaySync = (e: any) => {
+            if (!wsRef.current || !isReady) return;
+            if (e.detail.sourceId !== stemName) {
+                if (e.detail.time !== undefined) {
+                    // Force rigorous sync alignment before un-pausing to prevent drifting
+                    const targetTime = e.detail.time;
+                    const myTime = wsRef.current.getCurrentTime();
+                    // If drift is larger than 10ms, hard reset position
+                    if (Math.abs(targetTime - myTime) > 0.01) {
+                        wsRef.current.seekTo(targetTime / totalDuration);
+                    }
+                }
+                const playPromise = wsRef.current.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(error => console.warn("[StemPlayer] Auto-play prevented:", error));
+                }
+                setIsPlaying(true);
+            }
+        };
+        const handlePauseSync = (e: any) => {
+            if (!wsRef.current || !isReady) return;
+            if (e.detail.sourceId !== stemName) {
+                wsRef.current.pause();
+                setIsPlaying(false);
+            }
+        };
+        const handleStopSync = (e: any) => {
+            if (!wsRef.current || !isReady) return;
+            if (e.detail.sourceId !== stemName) {
+                wsRef.current.stop();
+                setIsPlaying(false);
+                setCurrentTime(0);
+            }
+        };
+        const handleSeekSync = (e: any) => {
+            if (!wsRef.current || !isReady || totalDuration === 0) return;
+            if (e.detail.sourceId !== stemName) {
+                wsRef.current.seekTo(e.detail.time / totalDuration);
+                setCurrentTime(e.detail.time);
+            }
+        };
+        const handleSoloUpdated = () => setGlobalSoloUpdate(Date.now());
+
+        window.addEventListener('stemsplit:play', handlePlaySync);
+        window.addEventListener('stemsplit:pause', handlePauseSync);
+        window.addEventListener('stemsplit:stop', handleStopSync);
+        window.addEventListener('stemsplit:seek', handleSeekSync);
+        window.addEventListener('stemsplit:soloUpdated', handleSoloUpdated);
+
+        return () => {
+            window.removeEventListener('stemsplit:play', handlePlaySync);
+            window.removeEventListener('stemsplit:pause', handlePauseSync);
+            window.removeEventListener('stemsplit:stop', handleStopSync);
+            window.removeEventListener('stemsplit:seek', handleSeekSync);
+            window.removeEventListener('stemsplit:soloUpdated', handleSoloUpdated);
+        };
+    }, [isReady, stemName, totalDuration]);
+
     // Volume sync
     useEffect(() => {
         if (wsRef.current && isReady) {
-            wsRef.current.setVolume(isMuted ? 0 : volume);
+            let actualVol = isMuted ? 0 : volume;
+            if (activeSolos.size > 0 && !activeSolos.has(stemName)) {
+                actualVol = 0;
+            }
+            wsRef.current.setVolume(actualVol);
         }
-    }, [volume, isMuted, isReady]);
+    }, [volume, isMuted, isReady, globalSoloUpdate, stemName]);
 
     // --- Controls ---
     const togglePlay = useCallback(() => {
         if (!wsRef.current) return;
-        wsRef.current.playPause();
-    }, []);
+        const willPlay = !isPlaying;
+        if (willPlay) {
+            window.dispatchEvent(new CustomEvent('stemsplit:play', { detail: { sourceId: stemName, time: wsRef.current.getCurrentTime() } }));
+            wsRef.current.play();
+        } else {
+            window.dispatchEvent(new CustomEvent('stemsplit:pause', { detail: { sourceId: stemName } }));
+            wsRef.current.pause();
+        }
+    }, [isPlaying, stemName]);
 
     const handleStop = useCallback(() => {
         if (!wsRef.current) return;
+        window.dispatchEvent(new CustomEvent('stemsplit:stop', { detail: { sourceId: stemName } }));
         wsRef.current.stop();
         setIsPlaying(false);
         setCurrentTime(0);
-    }, []);
+    }, [stemName]);
 
     const toggleMute = useCallback(() => {
         setIsMuted(prev => !prev);
     }, []);
 
+    const toggleSolo = useCallback(() => {
+        setIsSolo(prev => {
+            const next = !prev;
+            if (next) activeSolos.add(stemName);
+            else activeSolos.delete(stemName);
+            window.dispatchEvent(new Event('stemsplit:soloUpdated'));
+            return next;
+        });
+    }, [stemName]);
+
     const skipForward = useCallback(() => {
         if (!wsRef.current) return;
         const t = Math.min(wsRef.current.getCurrentTime() + 5, totalDuration);
+        window.dispatchEvent(new CustomEvent('stemsplit:seek', { detail: { sourceId: stemName, time: t } }));
         wsRef.current.seekTo(t / totalDuration);
-    }, [totalDuration]);
+    }, [totalDuration, stemName]);
 
     const skipBack = useCallback(() => {
         if (!wsRef.current) return;
         const t = Math.max(wsRef.current.getCurrentTime() - 5, 0);
+        window.dispatchEvent(new CustomEvent('stemsplit:seek', { detail: { sourceId: stemName, time: t } }));
         wsRef.current.seekTo(t / totalDuration);
-    }, [totalDuration]);
+    }, [totalDuration, stemName]);
 
     // Download stem
     const handleDownload = useCallback(async () => {
@@ -474,25 +571,35 @@ const StemPlayer: React.FC<StemPlayerProps> = ({ stemName, filePath, duration, p
                         {/* Divider */}
                         <div className="w-px h-4 bg-slate-700/50 mx-1" />
 
-                        {/* Volume */}
-                        <ControlBtn onClick={toggleMute} title={isMuted ? 'Unmute' : 'Mute'} disabled={!isReady}>
-                            {isMuted ? (
-                                <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor"><path d="M1 4.5h2l3-3v9l-3-3H1v-3z" opacity="0.4"/><path d="M9 3.5l3 3M12 3.5l-3 3" stroke="currentColor" strokeWidth="1.2" fill="none"/></svg>
-                            ) : (
-                                <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor"><path d="M1 4.5h2l3-3v9l-3-3H1v-3z"/><path d="M9 4a3 3 0 010 4" stroke="currentColor" strokeWidth="1" fill="none" opacity="0.6"/></svg>
-                            )}
-                        </ControlBtn>
-                        <input
-                            type="range"
-                            min={0} max={1} step={0.01}
-                            value={isMuted ? 0 : volume}
-                            onChange={e => { setVolume(parseFloat(e.target.value)); setIsMuted(false); }}
-                            className="w-12 h-1 appearance-none bg-slate-800 rounded-full outline-none cursor-pointer stem-vol-slider"
-                            style={{
-                                background: `linear-gradient(to right, ${colors.wave} 0%, ${colors.wave} ${(isMuted ? 0 : volume) * 100}%, #1e293b ${(isMuted ? 0 : volume) * 100}%, #1e293b 100%)`,
-                            }}
-                            title={`Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
-                        />
+                        {/* Mixer / Volume */}
+                        <div className="flex items-center gap-1.5 ml-1">
+                            <button
+                                onClick={toggleMute}
+                                title={isMuted ? 'Unmute' : 'Mute'}
+                                disabled={!isReady}
+                                className={`w-5 h-5 flex flex-shrink-0 items-center justify-center rounded transition-colors ${isMuted ? 'bg-red-500 hover:bg-red-600 shadow-[0_0_8px_rgba(239,68,68,0.4)]' : 'bg-slate-800 hover:bg-slate-700'}`}
+                            >
+                                <span className={`text-[10px] font-bold font-mono ${isMuted ? 'text-white' : 'text-slate-400'}`}>M</span>
+                            </button>
+                            <input
+                                type="range"
+                                min={0} max={1} step={0.01}
+                                value={isMuted ? 0 : volume}
+                                onChange={e => { setVolume(parseFloat(e.target.value)); setIsMuted(false); }}
+                                className="w-12 h-1 appearance-none bg-slate-800 rounded-full outline-none cursor-pointer stem-vol-slider"
+                                style={{
+                                    background: `linear-gradient(to right, ${colors.wave} 0%, ${colors.wave} ${(isMuted ? 0 : volume) * 100}%, #1e293b ${(isMuted ? 0 : volume) * 100}%, #1e293b 100%)`,
+                                }}
+                                title={`Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
+                            />
+                            <button
+                                onClick={toggleSolo}
+                                title="Solo"
+                                className={`w-5 h-5 flex flex-shrink-0 items-center justify-center rounded transition-colors ${isSolo ? 'bg-yellow-500 hover:bg-yellow-600 shadow-[0_0_8px_rgba(234,179,8,0.4)]' : 'bg-slate-800 hover:bg-slate-700'}`}
+                            >
+                                <span className={`text-[10px] font-bold font-mono ${isSolo ? 'text-white' : 'text-slate-400'}`}>S</span>
+                            </button>
+                        </div>
                     </div>
 
                     {/* Center: Selection tools */}
@@ -541,15 +648,6 @@ const StemPlayer: React.FC<StemPlayerProps> = ({ stemName, filePath, duration, p
                             accent={showFX ? colors.wave : undefined}
                         >
                             <span className="text-[8px] font-mono font-bold">FX</span>
-                        </ControlBtn>
-
-                        <ControlBtn 
-                            onClick={() => setIsSolo(prev => !prev)} 
-                            title="Solo" 
-                            active={isSolo}
-                            accent={isSolo ? '#facc15' : undefined}
-                        >
-                            <span className="text-[8px] font-mono font-bold">S</span>
                         </ControlBtn>
 
                         <ControlBtn onClick={handleDownload} title="Open stem folder" disabled={!isReady}>

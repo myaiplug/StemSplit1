@@ -3,8 +3,13 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence, useAnimation } from 'framer-motion';
 import { useStemSplit, StemSplitStatus } from '@/hooks/useStemSplit';
-import { openResultsFolder } from '@/lib/tauri-bridge';
+import { DownloadProgress, TrialCooldownStatus, getTrialCooldownStatus, installSupportAsset, openResultsFolder } from '@/lib/tauri-bridge';
 import { open as dialogOpen } from '@tauri-apps/api/dialog';
+import { stat } from '@tauri-apps/api/fs';
+import { listen } from '@tauri-apps/api/event';
+import LicenseModal from './LicenseModal';
+import { useLicense } from '@/contexts/LicenseContext';
+import { Key, Crown } from 'lucide-react';
 import TitleBar from './TitleBar';
 import StemPlayer from './StemPlayer';
 import OriginalPlayer from './OriginalPlayer';
@@ -256,6 +261,10 @@ const ParticleSphere: React.FC<{ isProcessing: boolean; progress: number; bassEn
 // --- Types ---
 
 type StemType = 'vocals' | 'drums' | 'bass' | 'other' | 'piano' | 'guitar' | 'kick' | 'snare' | 'toms' | 'cymbals' | 'instrumental';
+
+const MAX_UPLOAD_BYTES = 500 * 1024 * 1024; // Keep in sync with backend default
+const MAX_BATCH_FILES = 20;
+const ALLOWED_AUDIO_EXTENSIONS = new Set(['wav', 'mp3', 'flac', 'ogg', 'm4a']);
 
 // --- Visual Components ---
 
@@ -686,12 +695,20 @@ const ProcessTimer: React.FC<{ isRunning: boolean }> = ({ isRunning }) => {
 const ReactorZone: React.FC = () => {
     const [isDragOver, setIsDragOver] = useState(false);
     const [uiError, setUiError] = useState<string | null>(null);
+    const [assetInstallProgress, setAssetInstallProgress] = useState<DownloadProgress | null>(null);
+    const [isInstallingAsset, setIsInstallingAsset] = useState(false);
+    const [trialCooldown, setTrialCooldown] = useState<TrialCooldownStatus | null>(null);
+    const [securityFlashActive, setSecurityFlashActive] = useState(false);
     const dropZoneRef = useRef<HTMLDivElement>(null);
     
-    // Settings State
+    // License State
+    const [showLicense, setShowLicense] = useState(false);
+    const { license, isPro, isTrial } = useLicense();
+    
+    // Settings State - Trial users get spleeter/2-stem defaults
     const [showSettings, setShowSettings] = useState(false);
-    const [splitEngine, setSplitEngine] = useState('demucs');
-    const [splitStems, setSplitStems] = useState('4');
+    const [splitEngine, setSplitEngine] = useState(isTrial ? 'spleeter' : 'demucs');
+    const [splitStems, setSplitStems] = useState(isTrial ? '2' : '4');
     const [splitPasses, setSplitPasses] = useState('1');
     const [pendingFilePath, setPendingFilePath] = useState<string | null>(null);
     const [customOutputDir, setCustomOutputDir] = useState<string | null>(null);
@@ -699,9 +716,85 @@ const ReactorZone: React.FC = () => {
     const [bassEnergy, setBassEnergy] = useState(0);
     const [activeFxStem, setActiveFxStem] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const { status, progress: progressEvent, progressPercent, result, error, startSeparation, cancel } = useStemSplit();
+    const { status, progress: progressEvent, progressPercent, result, error, remediation, startSeparation, cancel } = useStemSplit();
     const { play, stop } = useSoundSystem();
     const prevStatus = useRef(status);
+
+    // Enforce trial limitations when license status changes
+    useEffect(() => {
+        if (isTrial) {
+            setSplitEngine('spleeter');
+            setSplitStems('2');
+            setSplitPasses('1');
+        }
+    }, [isTrial]);
+
+    useEffect(() => {
+        let isMounted = true;
+        let timer: NodeJS.Timeout | null = null;
+
+        const refreshCooldown = async () => {
+            if (!isTrial) {
+                if (isMounted) {
+                    setTrialCooldown(null);
+                }
+                return;
+            }
+
+            const status = await getTrialCooldownStatus();
+            if (isMounted) {
+                setTrialCooldown(status);
+            }
+
+            const nextTickMs = status.cooldown_active ? 1000 : 10000;
+            timer = setTimeout(refreshCooldown, nextTickMs);
+        };
+
+        refreshCooldown();
+
+        return () => {
+            isMounted = false;
+            if (timer) {
+                clearTimeout(timer);
+            }
+        };
+    }, [isTrial, status]);
+
+    useEffect(() => {
+        let unlisten: (() => void) | null = null;
+        let clearTimer: NodeJS.Timeout | null = null;
+
+        (async () => {
+            const isTauri = typeof window !== 'undefined' && '__TAURI__' in window;
+            if (!isTauri) {
+                return;
+            }
+
+            unlisten = await listen('security-incident', () => {
+                setSecurityFlashActive(true);
+                play('error_buzz');
+                if (clearTimer) {
+                    clearTimeout(clearTimer);
+                }
+                clearTimer = setTimeout(() => setSecurityFlashActive(false), 2200);
+            });
+        })();
+
+        return () => {
+            if (unlisten) {
+                unlisten();
+            }
+            if (clearTimer) {
+                clearTimeout(clearTimer);
+            }
+        };
+    }, [play]);
+
+    const formatRemaining = useCallback((seconds: number) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.max(0, seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }, []);
 
     // Track finished stems individually for UI glow
     const [finishedStems, setFinishedStems] = useState<Set<string>>(new Set());
@@ -723,6 +816,28 @@ const ReactorZone: React.FC = () => {
             setFinishedStems(new Set());
         }
     }, [status]);
+
+    const handleInstallMissingAsset = useCallback(async () => {
+        if (!remediation || isInstallingAsset) {
+            return;
+        }
+
+        setUiError(null);
+        setAssetInstallProgress(null);
+        setIsInstallingAsset(true);
+
+        try {
+            await installSupportAsset(remediation, (progress: DownloadProgress) => {
+                setAssetInstallProgress(progress);
+            });
+            setUiError(`${remediation.asset_name} installed. Retry the split.`);
+        } catch (installError) {
+            const message = installError instanceof Error ? installError.message : String(installError);
+            setUiError(`Failed to install ${remediation.asset_name}: ${message}`);
+        } finally {
+            setIsInstallingAsset(false);
+        }
+    }, [isInstallingAsset, remediation]);
 
     const stemLabels = useMemo(() => {
         if (splitEngine === 'drumsep') return ['kick', 'snare', 'toms', 'cymbals'];
@@ -758,6 +873,45 @@ const ReactorZone: React.FC = () => {
     const [pendingFiles, setPendingFiles] = useState<string[]>([]);
     const [queueIndex, setQueueIndex] = useState(0);
     const [isProcessingQueue, setIsProcessingQueue] = useState(false);
+
+    const validateSelectedPaths = useCallback(async (paths: string[]) => {
+        if (paths.length === 0) {
+            return null;
+        }
+
+        if (paths.length > MAX_BATCH_FILES) {
+            setUiError(`Too many files selected. Maximum batch size is ${MAX_BATCH_FILES}.`);
+            return null;
+        }
+
+        for (const filePath of paths) {
+            const extension = filePath.split('.').pop()?.toLowerCase() ?? '';
+            if (!ALLOWED_AUDIO_EXTENSIONS.has(extension)) {
+                setUiError(`Unsupported file type: ${filePath.split(/[\\/]/).pop()}. Allowed: wav, mp3, flac, ogg, m4a.`);
+                return null;
+            }
+
+            try {
+                const fileStats = await stat(filePath);
+                const fileSize = Number(fileStats.size ?? 0);
+                if (!Number.isFinite(fileSize) || fileSize <= 0) {
+                    setUiError(`Unreadable or empty file: ${filePath.split(/[\\/]/).pop()}.`);
+                    return null;
+                }
+
+                if (fileSize > MAX_UPLOAD_BYTES) {
+                    const sizeMb = Math.round(fileSize / (1024 * 1024));
+                    setUiError(`File too large (${sizeMb} MB). Maximum allowed size is 500 MB.`);
+                    return null;
+                }
+            } catch {
+                setUiError(`Unable to inspect file: ${filePath.split(/[\\/]/).pop()}.`);
+                return null;
+            }
+        }
+
+        return paths;
+    }, []);
     
     // Auto-advance queue
     useEffect(() => {
@@ -802,19 +956,25 @@ const ReactorZone: React.FC = () => {
             setUiError('File path unavailable in browser mode. Please use the desktop app.');
             return;
         }
+
+        const validatedPaths = await validateSelectedPaths(paths);
+        if (!validatedPaths) {
+            return;
+        }
         
         // If just one, behave as before
-        if (paths.length === 1) {
-            setPendingFilePath(paths[0]);
-            setLoadedFilePath(paths[0]);
+        if (validatedPaths.length === 1) {
+            setPendingFilePath(validatedPaths[0]);
+            setLoadedFilePath(validatedPaths[0]);
+            setPendingFiles([]);
         } else {
             // Bulk mode
-            setPendingFiles(paths);
-            setPendingFilePath(paths[0]); // Preview first one
-            setLoadedFilePath(paths[0]); 
+            setPendingFiles(validatedPaths);
+            setPendingFilePath(validatedPaths[0]); // Preview first one
+            setLoadedFilePath(validatedPaths[0]); 
         }
         setShowSettings(true);
-    }, []);
+    }, [validateSelectedPaths]);
 
     const handleResplitStem = useCallback((stemPath: string) => {
         // Treat the stem as a new source file for further splitting
@@ -840,15 +1000,16 @@ const ReactorZone: React.FC = () => {
                 
                 if (selected) {
                     const paths = Array.isArray(selected) ? selected : [selected];
-                    if (paths.length > 0) {
-                        if (paths.length === 1) {
-                            setPendingFilePath(paths[0]);
-                            setLoadedFilePath(paths[0]);
+                    const validatedPaths = await validateSelectedPaths(paths);
+                    if (validatedPaths && validatedPaths.length > 0) {
+                        if (validatedPaths.length === 1) {
+                            setPendingFilePath(validatedPaths[0]);
+                            setLoadedFilePath(validatedPaths[0]);
                             setPendingFiles([]);
                         } else {
-                            setPendingFiles(paths);
-                            setPendingFilePath(paths[0]);
-                            setLoadedFilePath(paths[0]);
+                            setPendingFiles(validatedPaths);
+                            setPendingFilePath(validatedPaths[0]);
+                            setLoadedFilePath(validatedPaths[0]);
                         }
                         setShowSettings(true);
                     }
@@ -860,7 +1021,7 @@ const ReactorZone: React.FC = () => {
             console.error("Failed to open dialog", err);
             play('error_buzz');
         }
-    }, [play, status]);
+    }, [play, status, validateSelectedPaths]);
 
     const handleSelectOutputDir = useCallback(async () => {
         try {
@@ -933,6 +1094,12 @@ const ReactorZone: React.FC = () => {
     }, [status, progressEvent, play]);
 
     const executePendingSplit = useCallback(async () => {
+        if (isTrial && trialCooldown?.cooldown_active) {
+            setUiError(`Trial cooldown active: ${formatRemaining(trialCooldown.remaining_seconds)} remaining. Upgrade for instant unlimited splits.`);
+            play('error_buzz');
+            return;
+        }
+
         if (pendingFilePath) {
             setShowSettings(false);
             play('process_loop');
@@ -958,12 +1125,38 @@ const ReactorZone: React.FC = () => {
                 });
             }
         }
-    }, [pendingFilePath, pendingFiles, startSeparation, play, customOutputDir, splitEngine, splitStems, splitPasses]);
+    }, [pendingFilePath, pendingFiles, startSeparation, play, customOutputDir, splitEngine, splitStems, splitPasses, isTrial, trialCooldown, formatRemaining]);
 
 
     // Main render
     return (
         <div className="relative min-h-screen flex flex-col items-center justify-center bg-slate-950 overflow-x-hidden overflow-y-auto">
+            <AnimatePresence>
+                {securityFlashActive && (
+                    <motion.div
+                        key="security-flash-overlay"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: [0.1, 0.65, 0.2, 0.7, 0.1] }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 2.2, ease: 'easeInOut' }}
+                        className="pointer-events-none fixed inset-0 z-[100]"
+                    >
+                        <motion.div
+                            className="absolute inset-0"
+                            animate={{
+                                background: [
+                                    'linear-gradient(90deg, rgba(239,68,68,0.55), rgba(59,130,246,0.25))',
+                                    'linear-gradient(90deg, rgba(59,130,246,0.55), rgba(239,68,68,0.25))',
+                                    'linear-gradient(90deg, rgba(239,68,68,0.55), rgba(59,130,246,0.25))',
+                                    'linear-gradient(90deg, rgba(59,130,246,0.55), rgba(239,68,68,0.25))',
+                                ],
+                            }}
+                            transition={{ duration: 0.28, repeat: 7, ease: 'linear' }}
+                        />
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
              
             {/* Custom Title Bar */}
             <TitleBar onToolTrigger={handleToolTrigger} />
@@ -980,6 +1173,50 @@ const ReactorZone: React.FC = () => {
             {/* Main UI Zone */}
             <div className="relative z-10 flex flex-col items-center justify-center w-full max-w-2xl mx-auto py-8">
                 <div className="flex flex-col items-center mb-4">
+                    {isTrial && trialCooldown && (
+                        <motion.div
+                            initial={{ opacity: 0, y: -8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mb-4 w-full max-w-xl"
+                        >
+                            <div className="relative overflow-hidden rounded-xl border border-cyan-500/30 bg-slate-900/70 backdrop-blur-xl">
+                                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.18),transparent_55%),radial-gradient(circle_at_bottom_left,rgba(251,191,36,0.12),transparent_45%)]" />
+                                <div className="relative px-4 py-3 flex items-center justify-between gap-3">
+                                    <div>
+                                        <p className="text-[10px] font-mono tracking-[0.28em] uppercase text-cyan-300/80">Free Mode Cadence Lock</p>
+                                        <p className="text-sm text-slate-100 font-semibold">
+                                            {trialCooldown.cooldown_active
+                                                ? `Next split in ${formatRemaining(trialCooldown.remaining_seconds)}`
+                                                : 'Cooldown clear. Ready for your next split.'}
+                                        </p>
+                                        <p className="text-[11px] text-slate-300 mt-1">
+                                            Split #{trialCooldown.completed_splits + 1} cooldown tier: {trialCooldown.next_cooldown_minutes} min
+                                        </p>
+                                    </div>
+
+                                    <button
+                                        onClick={() => setShowLicense(true)}
+                                        className="shrink-0 rounded-lg border border-amber-400/50 bg-amber-300/10 px-3 py-2 text-[11px] font-mono tracking-[0.18em] uppercase text-amber-200 transition hover:bg-amber-300/20"
+                                    >
+                                        Go Pro
+                                    </button>
+                                </div>
+
+                                {trialCooldown.cooldown_active && trialCooldown.current_cooldown_minutes > 0 && (
+                                    <div className="relative h-1.5 bg-slate-800/70">
+                                        <motion.div
+                                            className="h-full bg-gradient-to-r from-cyan-500 via-sky-400 to-amber-300"
+                                            animate={{
+                                                width: `${Math.max(0, Math.min(100, ((trialCooldown.current_cooldown_minutes * 60 - trialCooldown.remaining_seconds) / (trialCooldown.current_cooldown_minutes * 60)) * 100))}%`,
+                                            }}
+                                            transition={{ duration: 0.6, ease: 'linear' }}
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        </motion.div>
+                    )}
+
                     <GlitchText className="font-display font-bold uppercase text-center" style={{
                         fontSize: '2.8rem',
                         letterSpacing: '0.75em',
@@ -1070,7 +1307,27 @@ const ReactorZone: React.FC = () => {
                             exit={{ opacity: 0, y: -4 }}
                             className="mb-4 px-4 py-2 rounded border border-red-500/30 bg-red-950/30 backdrop-blur-sm"
                         >
-                            <span className="text-red-400 font-mono text-xs">{error instanceof Error ? error.message : (error || 'An error occurred.')}</span>
+                            <div className="flex flex-col gap-3">
+                                <span className="text-red-400 font-mono text-xs">{error instanceof Error ? error.message : (error || 'An error occurred.')}</span>
+                                {remediation && (
+                                    <div className="flex flex-col gap-2">
+                                        <span className="text-amber-300 font-mono text-[11px]">{remediation.message}</span>
+                                        <button
+                                            type="button"
+                                            onClick={handleInstallMissingAsset}
+                                            disabled={isInstallingAsset}
+                                            className="inline-flex w-fit items-center gap-2 rounded border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 text-[11px] font-mono uppercase tracking-[0.2em] text-cyan-200 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            {isInstallingAsset ? 'Installing...' : 'Install Missing Asset'}
+                                        </button>
+                                        {assetInstallProgress && (
+                                            <span className="text-cyan-300 font-mono text-[11px]">
+                                                Downloading {Math.round(assetInstallProgress.percentage)}%
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         </motion.div>
                     )}
                     {uiError && (
@@ -1089,16 +1346,15 @@ const ReactorZone: React.FC = () => {
                 {/* Drop Zone / Progress Bar */}
                 <div
                     ref={dropZoneRef}
-                    className={`relative w-full max-w-md rounded-lg transition-all duration-500 overflow-hidden ${
+                    className={`relative w-full max-w-xl rounded-lg transition-all duration-500 ${
                         status === StemSplitStatus.PROCESSING
-                            ? 'h-28 border border-cyan-500/10 bg-slate-950/30 backdrop-blur-sm cursor-not-allowed'
+                            ? 'h-28 border border-cyan-500/10 bg-slate-950/30 backdrop-blur-sm cursor-not-allowed overflow-hidden'
                             : status === StemSplitStatus.COMPLETED
-                            ? 'h-14 border border-emerald-500/10 bg-slate-950/20 backdrop-blur-[2px] cursor-pointer'
+                            ? 'h-14 border border-emerald-500/10 bg-slate-950/20 backdrop-blur-[2px] cursor-pointer overflow-hidden'
                             : isDragOver
-                            ? 'h-40 border-2 border-dashed border-cyan-400 bg-cyan-900/5 cursor-pointer'
-                            : 'h-40 border-2 border-dashed border-slate-700/50 bg-slate-900/15 cursor-pointer'
+                            ? 'min-h-[10rem] py-8 border-2 border-dashed border-cyan-400 bg-cyan-900/5'
+                            : 'min-h-[10rem] py-8 border-2 border-dashed border-slate-700/50 bg-slate-900/15'
                     }`}
-                    onClick={status === StemSplitStatus.PROCESSING ? undefined : handleOpenDialog}
                     onDragOver={e => { e.preventDefault(); setIsDragOver(true); }}
                     onDragLeave={e => { e.preventDefault(); setIsDragOver(false); }}
                     onDrop={async e => {
@@ -1129,21 +1385,47 @@ const ReactorZone: React.FC = () => {
                     />
 
                     <AnimatePresence mode="wait">
-                        {/* IDLE state: drop prompt */}
+                        {/* IDLE state: preloaded waveforms */}
                         {(status === StemSplitStatus.IDLE || status === StemSplitStatus.ERROR || status === StemSplitStatus.CANCELLED) && (
                             <motion.div
-                                key="drop-idle"
+                                key="waveform-idle"
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
                                 exit={{ opacity: 0, scale: 0.95 }}
                                 transition={{ duration: 0.3 }}
-                                className="absolute inset-0 flex flex-col items-center justify-center"
+                                className="relative flex flex-col items-center w-full"
                             >
-                                <svg className="w-8 h-8 text-slate-500 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-                                </svg>
-                                <span className="text-cyan-300 font-mono text-sm">Drop audio file here</span>
-                                <span className="text-slate-500 font-mono text-[10px] mt-1">or click to select · WAV MP3 FLAC OGG M4A</span>
+                                <div className="w-full max-w-xl space-y-3 px-4">
+                                    {/* Section header */}
+                                    <motion.div
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ duration: 0.3 }}
+                                        className="flex items-center gap-2 px-1 mb-2"
+                                    >
+                                        <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent" />
+                                        <span className="text-[9px] font-mono tracking-[0.3em] text-cyan-500/60 uppercase whitespace-nowrap">
+                                            Try the Web Version Demo
+                                        </span>
+                                        <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent" />
+                                    </motion.div>
+
+                                    {/* Preloaded Stem Players */}
+                                    {[
+                                        { name: 'vocals', path: '/examples/vocals.mp3' },
+                                        { name: 'drums', path: '/examples/drums.mp3' },
+                                        { name: 'bass', path: '/examples/bass.mp3' },
+                                        { name: 'other', path: '/examples/other.mp3' }
+                                    ].map((stem, index) => (
+                                        <StemPlayer
+                                            key={index}
+                                            stemName={stem.name}
+                                            filePath={stem.path}
+                                            duration={30} // default duration for examples
+                                            index={index}
+                                        />
+                                    ))}
+                                </div>
                             </motion.div>
                         )}
 
@@ -1251,9 +1533,9 @@ const ReactorZone: React.FC = () => {
                     </AnimatePresence>
                 </div>
 
-                {/* Stem Results / LED Indicators (during processing) */}
+                {/* Stem Results / LED Indicators */}
                 <AnimatePresence>
-                    {status !== StemSplitStatus.COMPLETED && (
+                    {(status === StemSplitStatus.PROCESSING || status === StemSplitStatus.IDLE || status === StemSplitStatus.ERROR || status === StemSplitStatus.CANCELLED) && (
                         <motion.div 
                             key="stem-leds"
                             initial={{ opacity: 0 }}
@@ -1261,8 +1543,8 @@ const ReactorZone: React.FC = () => {
                             exit={{ opacity: 0, height: 0 }}
                             className="mt-4 flex gap-8 perspective-500"
                         >
-                            {stemLabels.map((stem, i) => {
-                                const isFinished = finishedStems.has(stem);
+                            {['vocals', 'drums', 'bass', 'other'].map((stem, i) => {
+                                const isFinished = finishedStems.has(stem) || status !== StemSplitStatus.PROCESSING;
                                 const stemData = result?.stems?.[stem];
                                 const purity = stemData?.purity_score;
                                 return (
@@ -1315,14 +1597,33 @@ const ReactorZone: React.FC = () => {
                     )}
                 </AnimatePresence>
                 
-                {/* Settings Toggle Button */}
-                <button 
-                    onClick={() => setShowSettings(true)}
-                    className="mt-8 px-4 py-2 border border-slate-700 text-slate-400 hover:text-cyan-400 hover:border-cyan-800 rounded font-mono text-xs transition-colors"
-                >
-                    [ CONFIG OPTIONS ]
-                </button>
+                {/* Settings & License Buttons */}
+                <div className="mt-8 flex gap-3">
+                    <button 
+                        onClick={() => setShowSettings(true)}
+                        className="px-4 py-2 border border-slate-700 text-slate-400 hover:text-cyan-400 hover:border-cyan-800 rounded font-mono text-xs transition-colors"
+                    >
+                        [ CONFIG OPTIONS ]
+                    </button>
+                    <button 
+                        onClick={() => setShowLicense(true)}
+                        className={`px-4 py-2 border rounded font-mono text-xs transition-colors flex items-center gap-2 ${
+                            isPro 
+                                ? 'border-amber-500/50 text-amber-400 hover:border-amber-400' 
+                                : 'border-slate-700 text-slate-400 hover:text-blue-400 hover:border-blue-800'
+                        }`}
+                    >
+                        {isPro ? (
+                            <><Crown className="w-3 h-3" /> LICENSED</>
+                        ) : (
+                            <><Key className="w-3 h-3" /> TRIAL</>
+                        )}
+                    </button>
+                </div>
             </div>
+
+            {/* License Modal */}
+            <LicenseModal isOpen={showLicense} onClose={() => setShowLicense(false)} />
 
             {/* Config Modal */}
             <AnimatePresence>
@@ -1364,9 +1665,10 @@ const ReactorZone: React.FC = () => {
                                     </div>
                                 )}
                                 <div>
-                                    <label className="block mb-1 text-slate-400">Engine Output</label>
+                                    <label className="block mb-1 text-slate-400">Engine Output {isTrial && <span className="text-orange-400 text-[10px]">(Trial: Spleeter only)</span>}</label>
                                     <select 
                                         value={splitEngine} onChange={e => {
+                                            if (isTrial) return; // Prevent changes for trial users
                                             setSplitEngine(e.target.value);
                                             // Spleeter only does 2, 4, 5 stems
                                             if (e.target.value === 'spleeter' && splitStems === '6') {
@@ -1377,46 +1679,52 @@ const ReactorZone: React.FC = () => {
                                                 setSplitStems('4');
                                             }
                                         }}
-                                        className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-cyan-50 focus:border-cyan-500 outline-none"
-                                        title="Select the audio separation engine"
+                                        className={`w-full bg-slate-950 border rounded p-2 focus:border-cyan-500 outline-none ${isTrial ? 'border-orange-700/50 text-orange-300 cursor-not-allowed' : 'border-slate-700 text-cyan-50'}`}
+                                        title={isTrial ? "Upgrade to unlock Demucs, MDX, and other engines" : "Select the audio separation engine"}
+                                        disabled={isTrial}
                                     >
-                                        <option value="demucs">Demucs (V4, Hybrid)</option>
-                                        <option value="mdx">MDX-Net (Quality focus)</option>
-                                        <option value="spleeter">Spleeter (Fast)</option>
-                                        <option value="drumsep">Drumsep (Kick/Snare/Tom/Cymbal)</option>
+                                        <option value="demucs" disabled={isTrial}>Demucs (V4, Hybrid) {isTrial ? '🔒 Pro' : ''}</option>
+                                        <option value="mdx" disabled={isTrial}>MDX-Net (Quality focus) {isTrial ? '🔒 Pro' : ''}</option>
+                                        <option value="spleeter">Spleeter (Fast) {isTrial ? '✓ Free' : ''}</option>
+                                        <option value="drumsep" disabled={isTrial}>Drumsep (Kick/Snare/Tom/Cymbal) {isTrial ? '🔒 Pro' : ''}</option>
                                     </select>
                                 </div>
                                 
                                 <div>
-                                    <label className="block mb-1 text-slate-400">Number of Stems</label>
+                                    <label className="block mb-1 text-slate-400">Number of Stems {isTrial && <span className="text-orange-400 text-[10px]">(Trial: 2-stem only)</span>}</label>
                                     <select 
-                                        value={splitStems} onChange={e => setSplitStems(e.target.value)}
-                                        className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-cyan-50 focus:border-cyan-500 outline-none"
-                                        title="Select the number of stems to separate"
+                                        value={splitStems} onChange={e => {
+                                            if (isTrial) return; // Prevent changes for trial users
+                                            setSplitStems(e.target.value);
+                                        }}
+                                        className={`w-full bg-slate-950 border rounded p-2 focus:border-cyan-500 outline-none ${isTrial ? 'border-orange-700/50 text-orange-300 cursor-not-allowed' : 'border-slate-700 text-cyan-50'}`}
+                                        title={isTrial ? "Upgrade to unlock 4, 5, and 6 stem separation" : "Select the number of stems to separate"}
+                                        disabled={isTrial}
                                     >
-                                        <option value="2" disabled={splitEngine === 'drumsep'}>2-Stem (Vocal / Instrumental)</option>
-                                        <option value="4">
-                                            {splitEngine === 'drumsep' ? '4-Stem (Kick, Snare, Toms, Cymbals)' : '4-Stem (Vocal, Drum, Bass, Other)'}
+                                        <option value="2">2-Stem (Vocal / Instrumental) {isTrial ? '✓ Free' : ''}</option>
+                                        <option value="4" disabled={isTrial || splitEngine === 'drumsep'}>
+                                            {splitEngine === 'drumsep' ? '4-Stem (Kick, Snare, Toms, Cymbals)' : '4-Stem (Vocal, Drum, Bass, Other)'} {isTrial ? '🔒 Pro' : ''}
                                         </option>
-                                        <option value="5" disabled={splitEngine === 'drumsep'}>5-Stem (Adds Piano/Keys)</option>
-                                        <option value="6" disabled={splitEngine === 'spleeter' || splitEngine === 'drumsep'}>6-Stem {splitEngine === 'spleeter' ? '(Not Supported)' : '(Guitar, Piano, etc.)'}</option>
+                                        <option value="5" disabled={isTrial || splitEngine === 'drumsep'}>5-Stem (Adds Piano/Keys) {isTrial ? '🔒 Pro' : ''}</option>
+                                        <option value="6" disabled={isTrial || splitEngine === 'spleeter' || splitEngine === 'drumsep'}>6-Stem {splitEngine === 'spleeter' ? '(Not Supported)' : '(Guitar, Piano, etc.)'} {isTrial ? '🔒 Pro' : ''}</option>
                                     </select>
-                                    {splitEngine === 'drumsep' && <span className="text-[10px] text-orange-400 mt-1 block">Drumsep strictly breaks down drums into Kick, Snare, Toms, and Cymbals.</span>}
+                                    {splitEngine === 'drumsep' && !isTrial && <span className="text-[10px] text-orange-400 mt-1 block">Drumsep strictly breaks down drums into Kick, Snare, Toms, and Cymbals.</span>}
+                                    {isTrial && <span className="text-[10px] text-cyan-400 mt-1 block">Trial includes 2-stem (vocals + instrumental) separation. <button onClick={() => setShowLicense(true)} className="underline hover:text-cyan-300">Upgrade</button> for more options.</span>}
                                 </div>
                                 
                                 <div>
-                                    <label className="block mb-1 text-slate-400">Processing Passes</label>
+                                    <label className="block mb-1 text-slate-400">Processing Passes {isTrial && <span className="text-orange-400 text-[10px]">(Trial: 1 pass only)</span>}</label>
                                     <select 
                                         value={splitPasses} onChange={e => setSplitPasses(e.target.value)}
-                                        className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-cyan-50 focus:border-cyan-500 outline-none"
-                                        title="Select the number of processing passes"
-                                        disabled={splitEngine === 'spleeter'}
+                                        className={`w-full bg-slate-950 border rounded p-2 focus:border-cyan-500 outline-none ${isTrial ? 'border-orange-700/50 text-orange-300 cursor-not-allowed' : 'border-slate-700 text-cyan-50'}`}
+                                        title={isTrial ? 'Upgrade to unlock 2-pass and 3-pass processing' : 'Select the number of processing passes'}
+                                        disabled={isTrial || splitEngine === 'spleeter'}
                                     >
                                         <option value="1">1 Pass (Faster)</option>
-                                        <option value="2">2 Passes (Cleaner bleeding)</option>
-                                        <option value="3">3 Passes (Maximum Quality)</option>
+                                        <option value="2" disabled={isTrial}>2 Passes (Cleaner bleeding) {isTrial ? '🔒 Pro' : ''}</option>
+                                        <option value="3" disabled={isTrial}>3 Passes (Maximum Quality) {isTrial ? '🔒 Pro' : ''}</option>
                                     </select>
-                                    {splitEngine === 'spleeter' && <span className="text-[10px] text-orange-400 mt-1 block">Passes not available for Spleeter</span>}
+                                    {(splitEngine === 'spleeter' || isTrial) && <span className="text-[10px] text-orange-400 mt-1 block">{isTrial ? 'Trial is locked to 1 pass.' : 'Passes not available for Spleeter'}</span>}
                                 </div>
                                 
                                 <div>

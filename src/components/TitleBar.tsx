@@ -19,8 +19,8 @@ const QUICK_TOOLS: QuickToolItem[] = [
     // -- Analysis --
     {
         id: 'madmom-bpm',
-        label: 'Madmom BPM Detect',
-        sublabel: 'Beat-track stems via madmom neural net',
+        label: 'BPM Detect',
+        sublabel: 'Beat-track stems via A.I.-powered algorithm',
         icon: '◉',
         accentColor: 'cyan',
         category: 'analysis',
@@ -48,7 +48,7 @@ const QUICK_TOOLS: QuickToolItem[] = [
     {
         id: 'auto-fx-apply',
         label: 'Auto-FX Post Process',
-        sublabel: 'Feed madmom analysis into auto effect chain',
+        sublabel: 'Feed A.I. analysis into auto effect chain',
         icon: '⟐',
         accentColor: 'emerald',
         category: 'post-fx',

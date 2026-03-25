@@ -111,15 +111,15 @@ class AudioAnalyzer:
             duration = librosa.get_duration(y=y, sr=sr)
             
             # Musical features
-            bpm = AudioAnalyzer.detect_bpm(y, sr)
-            key = AudioAnalyzer.detect_key(y, sr) if duration > 5 else "N/A"
-            pitch = AudioAnalyzer.detect_pitch(y, sr) if duration > 0.5 else 0
-            lufs = AudioAnalyzer.measure_lufs(y, sr)
+            bpm = AudioAnalyzer.detect_bpm(y, int(sr))
+            key = AudioAnalyzer.detect_key(y, int(sr)) if duration > 5 else "N/A"
+            pitch = AudioAnalyzer.detect_pitch(y, int(sr)) if duration > 0.5 else 0
+            lufs = AudioAnalyzer.measure_lufs(y, int(sr))
             
             # Onsets (limit to first 30s to save time/space if huge)
             # Actually, user might want a map. Let's return count or sparse list.
             # Returning full list for UI visualization is good.
-            onsets = AudioAnalyzer.detect_onsets(y[:sr*60] if duration > 60 else y, sr) # Analyze first minute
+            onsets = AudioAnalyzer.detect_onsets(y[:int(sr)*60] if duration > 60 else y, int(sr)) # Analyze first minute
             
             return {
                 "filename": os.path.basename(file_path),
@@ -414,7 +414,7 @@ class OutputEncoder:
         output_path: str,
         format: str = 'wav',
         quality: int = 320,  # bitrate for MP3 in kbps
-        metadata: Dict[str, str] = None,
+        metadata: Dict[str, str] = {},
     ) -> Tuple[bool, str]:
         """
         Encode audio to specified format.
@@ -431,6 +431,9 @@ class OutputEncoder:
             Tuple of (success, message)
         """
         try:
+            # Ensure sr is always an int
+            sr = int(sr) if not isinstance(sr, int) else sr
+
             # Ensure stereo
             if audio.ndim == 1:
                 audio = np.stack([audio, audio])
@@ -451,7 +454,7 @@ class OutputEncoder:
             return False, f"Encoding error: {str(e)}"
 
     @staticmethod
-    def _encode_wav(audio: np.ndarray, sr: int, output_path: str, metadata: Dict[str, str] = None) -> Tuple[bool, str]:
+    def _encode_wav(audio: np.ndarray, sr: int, output_path: str, metadata: Dict[str, str] = {}) -> Tuple[bool, str]:
         """Encode to WAV format."""
         try:
             sf.write(
@@ -473,7 +476,7 @@ class OutputEncoder:
             return False, msg
 
     @staticmethod
-    def _encode_mp3(audio: np.ndarray, sr: int, output_path: str, bitrate: int = 320, metadata: Dict[str, str] = None) -> Tuple[bool, str]:
+    def _encode_mp3(audio: np.ndarray, sr: int, output_path: str, bitrate: int = 320, metadata: Dict[str, str] = {}) -> Tuple[bool, str]:
         """Encode to MP3 format using custom AI-driven libraries."""
         try:
             # First save as temporary WAV
@@ -747,9 +750,14 @@ class AudioSeparator:
                 # Drumsep uses a specific local repo and hash
                 import os
                 model_name = '49469ca8'
-                # Provide the local model repo path
+                # Provide the local model repo path (prefer canonical audio-separator-models location).
                 script_dir = os.path.dirname(os.path.abspath(__file__))
-                drumsep_repo = os.path.join(os.path.dirname(script_dir), 'drumsep-main', 'model')
+                project_root = os.path.dirname(script_dir)
+                candidate_repos = [
+                    os.path.join(project_root, 'Stem Split Models', 'audio-separator-models', 'drumsep-main', 'model'),
+                    os.path.join(project_root, 'drumsep-main', 'model'),
+                ]
+                drumsep_repo = next((p for p in candidate_repos if os.path.exists(p)), candidate_repos[0])
                 logger.info(f"Loading Drumsep model {model_name} from {drumsep_repo}")
                 model = get_model(model_name, repo=Path(drumsep_repo))
             else:
@@ -820,12 +828,25 @@ class AudioSeparator:
         logger.info("Starting MDX-Net stem separation...")
         separation_start = time.time()
         import importlib.util
+        mdx_folder = None
         
         try:
-            # We must map the imported script dynamically since its folder name has hyphens
-            mdx_folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "MVSEP-MDX23-music-separation-model-main")
-            if not os.path.exists(mdx_folder):
-                raise Exception(f"MDX model folder not found at {mdx_folder}")
+            # Search for MDX folder in multiple locations
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            possible_paths = [
+                os.path.join(project_root, "MVSEP-MDX23-music-separation-model-main"),
+                os.path.join(project_root, "Stem Split Models", "audio-separator-models", "MVSEP-MDX23-music-separation-model-main"),
+                os.path.join(project_root, "Stem Split Models", "MVSEP-MDX23-music-separation-model-main"),
+            ]
+            
+            mdx_folder = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    mdx_folder = path
+                    break
+            
+            if mdx_folder is None:
+                raise Exception(f"MDX model folder not found. Searched: {possible_paths}")
             
             logger.info(f"Importing MDX inference from {mdx_folder}")
             sys.path.insert(0, mdx_folder)
@@ -885,16 +906,24 @@ class AudioSeparator:
             # Create a progress callback wrapper if hook exists
             callback = None
             if progress_hook:
-                 def callback(p):
+                 def progress_callback(p):
                      # Map 0-100 to 40-90 range of overall progress (Step 3/5)
                      real_p = 40 + int(p * 0.5)
                      progress_hook(3, 5, f"MDX Processing ({p}%)...", real_p)
 
+                 callback = progress_callback
+
             logger.info(f"Calling separate_music_file (only_vocals={only_vocals})...")
+            
+            # Ensure total_files is at least 1 to avoid ZeroDivisionError
+            total_files = max(1, 1)
+
             separated_music_arrays, _ = model.separate_music_file(
                 mdx_audio, 
                 sr,
                 update_percent_func=callback,
+                current_file_number=0,
+                total_files=total_files,  # Use the updated total_files value
                 only_vocals=only_vocals
             )
             
@@ -932,7 +961,7 @@ class AudioSeparator:
         except Exception as e:
             logger.error(f"MDX Separation failed: {e}", exc_info=True)
             # Try to cleanup path even on error
-            if 'mdx_folder' in locals() and mdx_folder in sys.path:
+            if mdx_folder and mdx_folder in sys.path:
                 sys.path.remove(mdx_folder)
             raise
 
@@ -1230,7 +1259,7 @@ class AudioSeparator:
                 if fx_config:
                     # Apply custom pre-split FX
                     logger.info(f"Applying Pre-Split FX to {stem_name}...")
-                    stem_audio = apply_fx_chain(stem_audio, sr, fx_config)
+                    stem_audio = apply_fx_chain(stem_audio, sr=sr, config=fx_config)
                 elif self.apply_effects:
                     logger.info(f"Applying effects to {stem_name}...")
                     stem_audio = PedalboardEffects.apply_mastering_chain(
@@ -1393,6 +1422,7 @@ class AudioSeparator:
             "stems": {},
             "process_duration_seconds": 0,
             "errors": [],
+            "remediation": None,
         }
 
         try:
@@ -1454,10 +1484,67 @@ class AudioSeparator:
             progress_thread.daemon = True
             progress_thread.start()
 
-            
-            if hasattr(self, 'engine') and self.engine == 'mdx':
-                stems = self._separate_mdx(input_file, audio, sr, progress_hook)
-            elif hasattr(self, 'engine') and self.engine == 'spleeter':
+            effective_engine = getattr(self, 'engine', 'demucs')
+            stems_count = int(getattr(self, 'stems_count', 4))
+
+            # Safety net: keep historical 6-stem MDX behavior stable by forcing Demucs runtime path.
+            # This complements __init__ coercion and prevents regressions if config/state drifts.
+            if effective_engine == 'mdx' and stems_count > 4:
+                logger.warning(
+                    f"Runtime guard: MDX does not support {stems_count} stems, using Demucs fallback instead."
+                )
+                if progress_hook:
+                    progress_hook(3, 5, f"MDX {stems_count}-stem request routed to Demucs for stability.", 45)
+                effective_engine = 'demucs'
+
+            if effective_engine == 'mdx':
+                # Check if MDX support assets are available and return a structured remediation payload if not.
+                project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                mdx_paths = [
+                    os.path.join(project_root, "MVSEP-MDX23-music-separation-model-main"),
+                    os.path.join(project_root, "Stem Split Models", "audio-separator-models", "MVSEP-MDX23-music-separation-model-main"),
+                    os.path.join(project_root, "Stem Split Models", "MVSEP-MDX23-music-separation-model-main"),
+                ]
+                mdx_available = any(os.path.exists(p) for p in mdx_paths)
+                if mdx_available:
+                    stems = self._separate_mdx(input_file, audio, sr, progress_hook)
+                else:
+                    logger.warning(f"MDX support assets missing. Searched: {mdx_paths}")
+                    stop_progress.set()
+                    if progress_hook:
+                        progress_hook(3, 5, "MDX support assets missing. Install required package.", 35)
+                    manifest["errors"].append("MDX support assets are not installed on this machine.")
+                    manifest["remediation"] = {
+                        "kind": "support_asset",
+                        "asset_name": "mdx_support_assets",
+                        "download_url": "https://github.com/myaiplug/StemSplit1/releases/latest/download/mdx_support_assets.zip",
+                        "relative_destination": "Stem Split Models/audio-separator-models/MVSEP-MDX23-music-separation-model-main",
+                        "message": "MDX requires its support package before separation can start.",
+                    }
+                    return manifest
+            elif effective_engine == 'drumsep':
+                project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                drumsep_candidates = [
+                    os.path.join(project_root, 'Stem Split Models', 'audio-separator-models', 'drumsep-main', 'model', '49469ca8.th'),
+                    os.path.join(project_root, 'drumsep-main', 'model', '49469ca8.th'),
+                ]
+                drumsep_model = next((p for p in drumsep_candidates if os.path.exists(p)), None)
+                if not drumsep_model:
+                    logger.warning(f"Drumsep support assets missing. Searched: {drumsep_candidates}")
+                    stop_progress.set()
+                    if progress_hook:
+                        progress_hook(3, 5, "Drumsep support assets missing. Install required package.", 35)
+                    manifest["errors"].append("Drumsep support assets are not installed on this machine.")
+                    manifest["remediation"] = {
+                        "kind": "support_asset",
+                        "asset_name": "drumsep_support_assets",
+                        "download_url": "https://github.com/myaiplug/StemSplit1/releases/latest/download/drumsep_support_assets.zip",
+                        "relative_destination": "Stem Split Models/audio-separator-models/drumsep-main",
+                        "message": "Drumsep requires its support package before separation can start.",
+                    }
+                    return manifest
+                stems = self._separate_stems(audio, sr)
+            elif effective_engine == 'spleeter':
                 stems = self._separate_spleeter(audio, sr)
             else:
                 stems = self._separate_stems(audio, sr)
@@ -1468,7 +1555,6 @@ class AudioSeparator:
                 
             if 'vocals' in stems:
                 # First try applying sophisticated UVR denoise if the model is present
-                import os
                 script_dir = os.path.dirname(os.path.abspath(__file__))
                 uvr_denoiser_path = os.path.join(os.path.dirname(script_dir), 'UVR', 'models', 'VR_Models', 'UVR-DeNoise-Lite.pth')
                 
@@ -1659,6 +1745,10 @@ def main():
     parser.add_argument('--fx-config', type=str, default=None,
                         help='JSON string for pre-split effects')
     parser.add_argument('--analyze', action='store_true', help='Just analyze file and exit')
+    parser.add_argument('--trial-mode', action='store_true', 
+                        help='Running in trial mode with limitations')
+    parser.add_argument('--max-duration', type=int, default=0,
+                        help='Maximum audio duration in seconds (0 = unlimited)')
 
     args = parser.parse_args()
 
@@ -1796,6 +1886,38 @@ def main():
                 "errors": [str(e)],
             }
     else:
+        # ========================================================================
+        # TRIAL MODE: Check audio duration limit
+        # ========================================================================
+        if args.trial_mode and args.max_duration > 0:
+            try:
+                # Quick duration check without loading full audio
+                import librosa
+                duration = librosa.get_duration(path=args.input_file)
+                if duration > args.max_duration:
+                    error_msg = (
+                        f"Trial version only supports audio files up to {args.max_duration // 60} minutes. "
+                        f"This file is {duration / 60:.1f} minutes. Upgrade to process longer files."
+                    )
+                    progress_printer(1, 1, f"ERROR: {error_msg}", 0)
+                    manifest = {
+                        "status": "failed",
+                                                                                             "timestamp": datetime.now().isoformat(),
+                        "input_file": args.input_file,
+                        "output_directory": "",
+                       
+                        "config": config,
+                        "stems": {},
+                        "process_duration_seconds": 0,
+                        "errors": [error_msg],
+                    }
+                    print(json.dumps(manifest), flush=True)
+                    sys.exit(1)
+                logger.info(f"Trial mode: Duration {duration:.1f}s within {args.max_duration}s limit")
+            except Exception as e:
+                logger.warning(f"Could not check duration: {e}")
+        # ========================================================================
+
         # Standard Separation
         manifest = separator.separate(args.input_file, output_dir=args.output, progress_hook=progress_printer)
 
