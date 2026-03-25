@@ -14,6 +14,10 @@ _TO_REMOVE/
 .env.local
 .env.production
 
+# License keys (KEEP PRIVATE KEY SECRET!)
+scripts/.license_keys/
+.license_keys/
+
 # Personal/Private files
 public/sounds/GORDON_MASTER/
 *.code-workspace
@@ -64,11 +68,19 @@ temp.dmg
 # Model files (too large for git)
 Stem Split Models/
 models/
+MVSEP-MDX23-music-separation-model-main/
+drumsep-main/
+UVR/
 *.ckpt
 *.pth
 *.pt
 
 # Test files
 test_audio/
+test_audio.wav
 output/
 temp_audio/
+
+# Local diagnostics
+src-tauri/build_errors.txt
+src-tauri/errors.json

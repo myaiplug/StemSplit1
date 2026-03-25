@@ -5,14 +5,14 @@ Professional AI-powered audio stem separation tool.
 ## 📥 Download
 
 ### Windows
-[![Download for Windows](https://img.shields.io/badge/Download-Windows%20x64-blue?style=for-the-badge&logo=windows)](https://github.com/yourusername/stemsplit/releases/latest/download/StemSplit_Setup_x64.exe)
+[![Download for Windows](https://img.shields.io/badge/Download-Windows%20x64-blue?style=for-the-badge&logo=windows)](https://github.com/myaiplug/StemSplit1/releases/latest/download/StemSplit_Setup_v0.1.0_x64_Online.exe)
 
-**File:** `StemSplit_Setup_x64.exe` (~500 MB)
+**File:** `StemSplit_Setup_v0.1.0_x64_Online.exe`
 
 ### macOS
-[![Download for macOS](https://img.shields.io/badge/Download-macOS%20Universal-black?style=for-the-badge&logo=apple)](https://github.com/yourusername/stemsplit/releases/latest/download/StemSplit.dmg)
+[![Download for macOS](https://img.shields.io/badge/Download-macOS%20Universal-black?style=for-the-badge&logo=apple)](https://github.com/myaiplug/StemSplit1/releases/latest/download/StemSplit_Online_Setup.dmg)
 
-**File:** `StemSplit.dmg` (~500 MB)  
+**File:** `StemSplit_Online_Setup.dmg`  
 **Compatible with:** Intel Macs & Apple Silicon (M1/M2/M3)
 
 ---
@@ -91,7 +91,7 @@ Or: **Right-click** app → **"Open"** → Click **"Open"** in dialog
 ### Still Having Issues?
 - [Installation Guide (Windows)](INSTALLATION_WINDOWS.md)
 - [Installation Guide (macOS)](INSTALLATION_MAC.md)
-- [Open an issue](https://github.com/yourusername/stemsplit/issues)
+- [Open an issue](https://github.com/myaiplug/StemSplit1/issues)
 
 ---
 
@@ -106,7 +106,7 @@ Want to build it yourself? See:
 
 ## 📝 Version History
 
-See [Releases](https://github.com/yourusername/stemsplit/releases) for changelog.
+See [Releases](https://github.com/myaiplug/StemSplit1/releases) for changelog.
 
 ---
 
@@ -116,7 +116,7 @@ If you find StemSplit useful:
 - ⭐ Star this repository
 - 🐛 Report bugs and request features
 - 🤝 Contribute code or documentation
-- ☕ [Buy me a coffee](https://ko-fi.com/yourusername)
+- ☕ [Buy me a coffee](https://ko-fi.com/myaiplug)
 
 ---
 

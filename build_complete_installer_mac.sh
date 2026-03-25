@@ -73,7 +73,26 @@ echo -e "${GREEN}✓ Application bundle created${NC}"
 # Step 5: Create DMG installer
 echo ""
 echo -e "${YELLOW}[5/5] Creating DMG installer...${NC}"
+
+PAYLOAD_MANIFEST="scripts/ci/model_payload_manifest.json"
+if [ -f "$PAYLOAD_MANIFEST" ]; then
+    mkdir -p installers
+    echo "Running model payload manifest validation..."
+    python3 ./scripts/ci/validate_model_payloads.py \
+        --manifest "$PAYLOAD_MANIFEST" \
+        --repo-root "." \
+        --json-out "installers/model-payload-report.json" \
+        --md-out "installers/model-payload-report.md"
+    echo -e "${GREEN}✓ Model payload validation passed${NC}"
+else
+    echo -e "${YELLOW}Model payload manifest not found; skipping payload validation${NC}"
+fi
+
 ./create_mac_dmg.sh
+
+if [ -f "installers/StemSplit.dmg" ]; then
+    shasum -a 256 "installers/StemSplit.dmg" | awk '{print $1 "  StemSplit.dmg"}' > "installers/checksums-mac.sha256"
+fi
 
 if [ $? -eq 0 ]; then
     echo ""
@@ -88,6 +107,9 @@ if [ $? -eq 0 ]; then
         echo -e "${CYAN}Installer Details:${NC}"
         echo "  Location: $DMG_PATH"
         echo "  Size: $DMG_SIZE"
+        if [ -f "installers/checksums-mac.sha256" ]; then
+            echo "  Checksums: installers/checksums-mac.sha256"
+        fi
         echo ""
         echo -e "${CYAN}Opening installer folder...${NC}"
         open installers/
