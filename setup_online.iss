@@ -104,7 +104,7 @@ end;
 function EnableImportSite(PythonDir: String): Boolean;
 var
   PthFile: String;
-  Content: AnsiString;
+  Content: String;
 begin
   Result := False;
   PthFile := PythonDir + '\python310._pth';
