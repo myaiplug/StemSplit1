@@ -5,7 +5,6 @@ on:
     branches: [ main ]
     paths:
       - 'build_complete_installer_mac.sh'
-      - 'build_online_installer_mac.sh'
       - 'create_mac_dmg.sh'
       - 'src-tauri/**'
       - 'scripts/**'
@@ -13,7 +12,6 @@ on:
   pull_request:
     paths:
       - 'build_complete_installer_mac.sh'
-      - 'build_online_installer_mac.sh'
       - 'create_mac_dmg.sh'
       - 'src-tauri/**'
       - 'scripts/**'
@@ -41,7 +39,7 @@ jobs:
         run: npm ci --legacy-peer-deps
 
       - name: Build online mac installer
-        run: bash ./build_online_installer_mac.sh
+        run: bash ./build_complete_installer_mac.sh
 
       - name: Run DMG smoke tests
         run: bash ./scripts/ci/smoke_test_mac_installer.sh installers/StemSplit_Online_Setup.dmg installers/smoke-macos.json
