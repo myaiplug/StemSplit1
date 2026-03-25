@@ -104,16 +104,19 @@ end;
 function EnableImportSite(PythonDir: String): Boolean;
 var
   PthFile: String;
+  ContentAnsi: AnsiString;
   Content: String;
 begin
   Result := False;
   PthFile := PythonDir + '\python310._pth';
   if FileExists(PthFile) then
   begin
-    if LoadStringFromFile(PthFile, Content) then
+    if LoadStringFromFile(PthFile, ContentAnsi) then
     begin
+      Content := ContentAnsi;
       StringChangeEx(Content, '#import site', 'import site', True);
-      Result := SaveStringToFile(PthFile, Content, False);
+      ContentAnsi := Content;
+      Result := SaveStringToFile(PthFile, ContentAnsi, False);
     end;
   end;
 end;

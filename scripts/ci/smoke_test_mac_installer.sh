@@ -67,7 +67,7 @@ DMG_PATH="$(resolve_installer)"
 echo "[Smoke-Mac] Using installer: $DMG_PATH"
 
 ATTACH_OUTPUT=$(hdiutil attach -nobrowse -readonly "$DMG_PATH")
-MOUNT_POINT=$(echo "$ATTACH_OUTPUT" | awk 'END {print $3}')
+MOUNT_POINT=$(echo "$ATTACH_OUTPUT" | awk '/\/Volumes\// { idx=index($0, "/Volumes/"); if (idx > 0) print substr($0, idx) }' | tail -n 1)
 
 cleanup() {
   if mount | grep -q "$MOUNT_POINT"; then
