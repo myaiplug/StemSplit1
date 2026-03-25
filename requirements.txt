@@ -4,7 +4,7 @@
 # PyTorch - MUST be installed first with CUDA support for GPU acceleration
 # CPU-only version for smaller installer (GPU users can upgrade manually)
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.1.0+cpu
+torch==2.7.1+cpu
 torchaudio==2.1.0+cpu
 
 # Core AI Separation Engines
