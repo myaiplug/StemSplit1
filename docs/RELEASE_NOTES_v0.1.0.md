@@ -1,7 +1,7 @@
 # StemSplit v0.1.0
 
 Release date: 2026-03-25
-Commit: `ca031e4`
+Commit: `e2aa59b`
 
 ## Highlights
 
@@ -28,7 +28,11 @@ Commit: `ca031e4`
 
 ### macOS
 - `StemSplit_Online_Setup.dmg`
-- SHA-256: add from CI artifact `installers/checksums-mac.sha256`
+- SHA-256:
+
+```text
+3770410f135fa6556f637f5dd055183c9534486a1d3871585df77ea9d3e051af  StemSplit_Online_Setup.dmg
+```
 
 ## Validation Evidence
 
