@@ -22,8 +22,12 @@ DMG_NAME="${APP_NAME}_Online_Setup.dmg"
 # 1. Ensure output directory exists
 mkdir -p "$OUTPUT_DIR"
 
-# 2. Build Tauri App (Without injecting Python dependencies or models)
-echo "[1/2] Building Tauri React frontend & rust backend..."
+# 2. Build frontend assets expected by tauri.conf distDir
+echo "[1/3] Building frontend assets..."
+npm run build
+
+# 3. Build Tauri App (Without injecting Python dependencies or models)
+echo "[2/3] Building Tauri React frontend & rust backend..."
 # npm run tauri build creates the .app wrapper
 npm run tauri build
 
@@ -35,7 +39,7 @@ if [ ! -d "$APP_BUNDLE" ]; then
     exit 1
 fi
 
-echo "[2/2] Packing into a lightweight DMG..."
+echo "[3/3] Packing into a lightweight DMG..."
 
 # Create temporary directory for DMG contents
 TEMP_DIR=$(mktemp -d)

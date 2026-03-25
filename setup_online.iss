@@ -42,12 +42,12 @@ Source: "src-tauri\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ign
 Source: "scripts\*"; DestDir: "{app}\scripts"; Flags: recursesubdirs createallsubdirs; Excludes: "logs, __pycache__, .git, .vscode, .idea, *.log, s3_*_folder_lists, test_audio, *.txt, *.bmp, *.png, *.json, *.xml, *.yaml"
 
 ; Model Dependencies
-Source: "drumsep-main\*"; DestDir: "{app}\drumsep-main"; Flags: recursesubdirs createallsubdirs; Excludes: "__pycache__, .git, *.md, LICENSE, drumsepInstall"
-Source: "MVSEP-MDX23-music-separation-model-main\*"; DestDir: "{app}\MVSEP-MDX23-music-separation-model-main"; Flags: recursesubdirs createallsubdirs; Excludes: "__pycache__, .git, output, *.wav, gui.py, web-ui.py, *.md, images"
-Source: "UVR\*"; DestDir: "{app}\UVR"; Flags: recursesubdirs createallsubdirs; Excludes: "__pycache__, .git, *.png, *.jpg"
+Source: "drumsep-main\*"; DestDir: "{app}\drumsep-main"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist; Excludes: "__pycache__, .git, *.md, LICENSE, drumsepInstall"
+Source: "MVSEP-MDX23-music-separation-model-main\*"; DestDir: "{app}\MVSEP-MDX23-music-separation-model-main"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist; Excludes: "__pycache__, .git, output, *.wav, gui.py, web-ui.py, *.md, images"
+Source: "UVR\*"; DestDir: "{app}\UVR"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist; Excludes: "__pycache__, .git, *.png, *.jpg"
 
 ; Trained Models
-Source: "Stem Split Models\*"; DestDir: "{app}\Stem Split Models"; Flags: recursesubdirs createallsubdirs
+Source: "Stem Split Models\*"; DestDir: "{app}\Stem Split Models"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 ; Requirements file for pip
 Source: "requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
