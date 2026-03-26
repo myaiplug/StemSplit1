@@ -48,8 +48,8 @@ function Invoke-SilentUninstall {
 
 $resolvedInstaller = Resolve-InstallerPath -InputPath $InstallerPath
 $mainExeCandidates = @(
-    Join-Path $InstallDir "StemSplit.exe",
-    Join-Path $InstallDir "stem-split.exe"
+    (Join-Path $InstallDir "StemSplit.exe"),
+    (Join-Path $InstallDir "stem-split.exe")
 )
 $uninstaller = Join-Path $InstallDir "unins000.exe"
 
