@@ -35,7 +35,7 @@ const SECURITY_WEBHOOK_RETRY_DELAY_MS: u64 = 900;
 // ============================================================================
 
 // Your Gumroad product permalink/ID
-const GUMROAD_PRODUCT_ID: &str = "stemsplit";
+const GUMROAD_PRODUCT_ID: &str = "rQTVqaHxdUm5urq5oJKQhw==";
 
 // How often to re-verify license online (in seconds) - 7 days
 const LICENSE_RECHECK_INTERVAL: i64 = 7 * 24 * 60 * 60;

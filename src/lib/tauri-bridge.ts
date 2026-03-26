@@ -327,15 +327,30 @@ export interface TrialLimitations {
 }
 
 export async function getLicenseStatus(): Promise<LicenseInfo> {
-  return { status: 'free', key: null, email: null };
+  try {
+    return await invoke<LicenseInfo>('get_license_status');
+  } catch (error) {
+    console.error('Failed to get license status:', error);
+    return { status: 'free', key: null, email: null };
+  }
 }
 
-export async function activateLicense(key: string, email: string): Promise<LicenseInfo> {
-  return { status: 'pro', key, email };
+export async function activateLicense(licenseKey: string, email: string): Promise<LicenseInfo> {
+  try {
+    return await invoke<LicenseInfo>('activate_license', { licenseKey, email });
+  } catch (error) {
+    console.error('Failed to activate license:', error);
+    return { status: 'free', key: null, email: null, error: String(error) };
+  }
 }
 
 export async function deactivateLicense(): Promise<LicenseInfo> {
-  return { status: 'free', key: null, email: null };
+  try {
+    return await invoke<LicenseInfo>('deactivate_license');
+  } catch (error) {
+    console.error('Failed to deactivate license:', error);
+    return { status: 'free', key: null, email: null };
+  }
 }
 
 export function isPro(license: LicenseInfo | null): boolean {

@@ -215,7 +215,21 @@ const TitleBar: React.FC<TitleBarProps> = ({ onToolTrigger }) => {
                             )}
                         </AnimatePresence>
                     </div>
-                    <span className="text-[9px] text-cyan-400/70 font-minimal font-light tracking-tight pointer-events-none uppercase">StemSplit v1.2</span>
+                    <span className="text-[9px] text-cyan-400/70 font-minimal font-light tracking-tight pointer-events-none uppercase">StemSplit v0.3.0</span>
+                </div>
+
+                {/* License Button Area */}
+                <div className="flex items-center no-drag z-[101]">
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            window.dispatchEvent(new CustomEvent('open-license-modal'));
+                        }}
+                        className="px-3 py-1 mr-4 rounded bg-amber-500/20 border border-amber-500/30 text-amber-400 hover:bg-amber-500 hover:text-slate-900 transition-all text-[10px] font-bold uppercase tracking-wider shadow-[0_0_10px_rgba(245,158,11,0.2)] hover:shadow-[0_0_15px_rgba(245,158,11,0.6)] cursor-pointer"
+                        title="Manage License"
+                    >
+                        PRO / UPGRADE
+                    </button>
                 </div>
 
                 {/* Window Controls - Right - Non-Draggable (Only for Tauri App) */}
