@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StemSplit - AI-Powered Audio Separation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom colors matching StemSplit GUI */
+        .stem-vocals { background-color: #a78bfa; }
+        .stem-drums { background-color: #f87171; }
+        .stem-bass { background-color: #60a5fa; }
+        .stem-other { background-color: #facc15; }
+        .stem-piano { background-color: #e879f9; }
+        .stem-guitar { background-color: #fb923c; }
+
+        /* Gradient background */
+        body {
+            background: linear-gradient(135deg, rgba(2,6,23,0.92) 0%, rgba(8,15,40,0.95) 50%, rgba(2,6,23,0.92) 100%);
+            backdrop-filter: blur(16px);
+        }
+
+        /* Animations */
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans">
+    <header class="bg-gray-800 py-4 fade-in">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-cyan-400">StemSplit</h1>
+            <nav>
+                <a href="#features" class="text-gray-300 hover:text-cyan-400 mx-2">Features</a>
+                <a href="#download" class="text-gray-300 hover:text-cyan-400 mx-2">Download</a>
+                <a href="#support" class="text-gray-300 hover:text-cyan-400 mx-2">Support</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-4 py-8">
+        <section class="text-center mb-12 fade-in">
+            <h2 class="text-4xl font-bold text-cyan-400 mb-4">AI-Powered Audio Stem Separation</h2>
+            <p class="text-gray-300">Separate vocals, drums, bass, and more with precision using StemSplit's advanced AI technology.</p>
+        </section>
+
+        <section id="features" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12 fade-in">
+            <div class="p-6 bg-gray-800 rounded-lg shadow-lg stem-vocals">
+                <h3 class="text-xl font-bold text-gray-100">Vocals</h3>
+                <p class="text-gray-300">Isolate vocals with unmatched clarity.</p>
+            </div>
+            <div class="p-6 bg-gray-800 rounded-lg shadow-lg stem-drums">
+                <h3 class="text-xl font-bold text-gray-100">Drums</h3>
+                <p class="text-gray-300">Extract drum tracks effortlessly.</p>
+            </div>
+            <div class="p-6 bg-gray-800 rounded-lg shadow-lg stem-bass">
+                <h3 class="text-xl font-bold text-gray-100">Bass</h3>
+                <p class="text-gray-300">Focus on the bassline with precision.</p>
+            </div>
+            <div class="p-6 bg-gray-800 rounded-lg shadow-lg stem-other">
+                <h3 class="text-xl font-bold text-gray-100">Other</h3>
+                <p class="text-gray-300">Separate other instruments seamlessly.</p>
+            </div>
+            <div class="p-6 bg-gray-800 rounded-lg shadow-lg stem-piano">
+                <h3 class="text-xl font-bold text-gray-100">Piano</h3>
+                <p class="text-gray-300">Isolate piano tracks with ease.</p>
+            </div>
+            <div class="p-6 bg-gray-800 rounded-lg shadow-lg stem-guitar">
+                <h3 class="text-xl font-bold text-gray-100">Guitar</h3>
+                <p class="text-gray-300">Extract guitar stems accurately.</p>
+            </div>
+        </section>
+
+        <section id="download" class="text-center mb-12 fade-in">
+            <h2 class="text-3xl font-bold text-cyan-400 mb-4">Download StemSplit</h2>
+            <p class="text-gray-300 mb-4">Get started with StemSplit today and experience the future of audio separation.</p>
+            <a href="#" class="px-6 py-3 bg-cyan-500 text-gray-900 font-bold rounded hover:bg-cyan-400">Download Now</a>
+        </section>
+
+        <section id="support" class="text-center fade-in">
+            <h2 class="text-3xl font-bold text-cyan-400 mb-4">Support the Project</h2>
+            <p class="text-gray-300 mb-4">If you find StemSplit useful, consider supporting us:</p>
+            <a href="#" class="px-6 py-3 bg-yellow-500 text-gray-900 font-bold rounded hover:bg-yellow-400">Buy Me a Coffee</a>
+        </section>
+
+        <section id="examples" class="text-center mb-12 fade-in">
+            <h2 class="text-3xl font-bold text-cyan-400 mb-4">Examples</h2>
+            <p class="text-gray-300 mb-4">See StemSplit in action with these examples:</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="p-6 bg-gray-800 rounded-lg shadow-lg">
+                    <audio controls>
+                        <source src="examples/original.mp3" type="audio/mpeg">
+                        Your browser does not support the audio element.
+                    </audio>
+                    <p class="text-gray-300 mt-2">Original Track</p>
+                </div>
+                <div class="p-6 bg-gray-800 rounded-lg shadow-lg">
+                    <audio controls>
+                        <source src="examples/vocals.mp3" type="audio/mpeg">
+                        Your browser does not support the audio element.
+                    </audio>
+                    <p class="text-gray-300 mt-2">Separated Vocals</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="articles" class="text-center mb-12 fade-in">
+            <h2 class="text-3xl font-bold text-cyan-400 mb-4">Helpful Articles</h2>
+            <p class="text-gray-300 mb-4">Explore our articles to learn more about audio separation and remixing:</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="p-6 bg-gray-800 rounded-lg shadow-lg">
+                    <h3 class="text-xl font-bold text-gray-100 mb-2">How to Separate Vocals from Music</h3>
+                    <p class="text-gray-300">Learn the basics of audio separation and how StemSplit makes it easy.</p>
+                    <a href="#" class="text-cyan-400 hover:underline">Read More</a>
+                </div>
+                <div class="p-6 bg-gray-800 rounded-lg shadow-lg">
+                    <h3 class="text-xl font-bold text-gray-100 mb-2">Top 5 Tips for Remixing Tracks</h3>
+                    <p class="text-gray-300">Discover tips and tricks for creating amazing remixes.</p>
+                    <a href="#" class="text-cyan-400 hover:underline">Read More</a>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="bg-gray-800 py-4 fade-in">
+        <div class="container mx-auto text-center text-gray-500">
+            <p>&copy; 2026 StemSplit. All rights reserved.</p>
+        </div>
+    </footer>
+</body>
+</html>

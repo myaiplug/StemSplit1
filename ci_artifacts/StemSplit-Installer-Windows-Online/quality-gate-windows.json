@@ -1,0 +1,49 @@
+{
+  "metadata": {
+    "platform": "windows",
+    "installer_glob": "installers/StemSplit_Setup_*_Online.exe",
+    "installer_path": "installers\\StemSplit_Setup_v0.1.0_x64_Online.exe",
+    "installer_size_mb": 4.12,
+    "total_score": 100,
+    "threshold": 90,
+    "passed": true
+  },
+  "checks": [
+    {
+      "name": "artifact_exists",
+      "weight": 25,
+      "passed": true,
+      "details": "installers\\StemSplit_Setup_v0.1.0_x64_Online.exe"
+    },
+    {
+      "name": "size_sanity",
+      "weight": 10,
+      "passed": true,
+      "details": "4.12 MB"
+    },
+    {
+      "name": "checksum_manifest_present",
+      "weight": 15,
+      "passed": true,
+      "details": "installers/checksums-windows.sha256"
+    },
+    {
+      "name": "checksum_match",
+      "weight": 15,
+      "passed": true,
+      "details": "match (StemSplit_Setup_v0.1.0_x64_Online.exe)"
+    },
+    {
+      "name": "smoke_tests_passed",
+      "weight": 20,
+      "passed": true,
+      "details": "Installer smoke tests passed"
+    },
+    {
+      "name": "release_hardening_files_present",
+      "weight": 15,
+      "passed": true,
+      "details": "payload report indicates pass"
+    }
+  ]
+}

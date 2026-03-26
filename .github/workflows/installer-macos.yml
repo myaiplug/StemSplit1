@@ -28,12 +28,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-13
-            archLabel: Intel
+          # macos-13 (Intel) disabled for now: with free-tier GitHub macOS
+          # runner availability, the Intel job is cancelled before it starts.
+          # Re-enable Intel CI when dedicated/paid macOS runner capacity exists.
           - runner: macos-14
             archLabel: AppleSilicon
     runs-on: ${{ matrix.runner }}
-    continue-on-error: ${{ matrix.runner == 'macos-13' }}
     timeout-minutes: 60
 
     steps:

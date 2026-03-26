@@ -1,0 +1,14 @@
+{
+  "installer_path": "D:\\a\\StemSplit1\\StemSplit1\\installers\\StemSplit_Setup_v0.1.0_x64_Online.exe",
+  "install_dir": "C:\\Program Files\\StemSplit",
+  "checks": {
+    "baseline_uninstall": true,
+    "install_main_exe": true,
+    "install_uninstaller": true,
+    "uninstall_removed_main_exe": true,
+    "reinstall_main_exe": true
+  },
+  "message": "Installer smoke tests passed",
+  "passed": true,
+  "platform": "windows"
+}
