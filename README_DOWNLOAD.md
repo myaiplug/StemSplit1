@@ -10,11 +10,10 @@ Professional AI-powered audio stem separation tool.
 **File:** `StemSplit_Setup_v0.1.0_x64_Online.exe`
 
 ### macOS
-[![Download for macOS Intel](https://img.shields.io/badge/Download-macOS%20Intel-black?style=for-the-badge&logo=apple)](https://github.com/myaiplug/StemSplit1/releases/latest/download/StemSplit_Online_Setup_macOS_Intel.dmg)
-[![Download for macOS Apple Silicon](https://img.shields.io/badge/Download-macOS%20Apple%20Silicon-black?style=for-the-badge&logo=apple)](https://github.com/myaiplug/StemSplit1/releases/latest/download/StemSplit_Online_Setup_macOS_AppleSilicon.dmg)
+[![Download for macOS](https://img.shields.io/badge/Download-macOS-black?style=for-the-badge&logo=apple)](https://github.com/myaiplug/StemSplit1/releases/latest/download/StemSplit_Online_Setup.dmg)
 
-**Intel file:** `StemSplit_Online_Setup_macOS_Intel.dmg`  
-**Apple Silicon file:** `StemSplit_Online_Setup_macOS_AppleSilicon.dmg`
+**File:** `StemSplit_Online_Setup.dmg`  
+*(Universal installer compatible with both Intel and Apple Silicon Macs)*
 
 ---
 
