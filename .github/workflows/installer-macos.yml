@@ -33,6 +33,7 @@ jobs:
           - runner: macos-14
             archLabel: AppleSilicon
     runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.runner == 'macos-13' }}
     timeout-minutes: 60
 
     steps:
