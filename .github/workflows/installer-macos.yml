@@ -22,7 +22,15 @@ on:
 
 jobs:
   build-and-smoke-test:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-13
+            archLabel: Intel
+          - runner: macos-14
+            archLabel: AppleSilicon
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
 
     steps:
@@ -44,7 +52,7 @@ jobs:
         run: bash ./build_online_installer_mac.sh
 
       - name: Run DMG smoke tests
-        run: bash ./scripts/ci/smoke_test_mac_installer.sh installers/StemSplit_Online_Setup.dmg installers/smoke-macos.json
+        run: bash ./scripts/ci/smoke_test_mac_installer.sh installers/StemSplit_Online_Setup_macOS_${{ matrix.archLabel }}.dmg installers/smoke-macos.json
 
       - name: Validate model payload folders
         run: |
@@ -58,7 +66,7 @@ jobs:
         run: |
           python3 ./scripts/ci/generate_release_manifest.py \
             --platform macos \
-            --pattern "installers/StemSplit_Online_Setup.dmg" \
+            --pattern "installers/StemSplit_Online_Setup_macOS_${{ matrix.archLabel }}.dmg" \
             --pattern "installers/checksums-mac.sha256" \
             --out "installers/release-manifest-macos.json"
 
@@ -66,7 +74,7 @@ jobs:
         run: |
           python3 ./scripts/ci/installer_quality_gate.py \
             --platform macos \
-            --installer-glob "installers/StemSplit_Online_Setup.dmg" \
+            --installer-glob "installers/StemSplit_Online_Setup_macOS_${{ matrix.archLabel }}.dmg" \
             --checksum-file "installers/checksums-mac.sha256" \
             --threshold 90 \
             --smoke-report "installers/smoke-macos.json" \
@@ -83,9 +91,9 @@ jobs:
       - name: Upload mac installer artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: StemSplit-macOS-Installer
+          name: StemSplit-macOS-Installer-${{ matrix.archLabel }}
           path: |
-            installers/StemSplit_Online_Setup.dmg
+            installers/StemSplit_Online_Setup_macOS_${{ matrix.archLabel }}.dmg
             installers/checksums-mac.sha256
             installers/smoke-macos.json
             installers/model-payload-report.json

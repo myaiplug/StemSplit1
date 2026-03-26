@@ -17,7 +17,21 @@ echo ""
 
 APP_NAME="StemSplit"
 OUTPUT_DIR="installers"
-DMG_NAME="${APP_NAME}_Online_Setup.dmg"
+
+ARCH_RAW="$(uname -m)"
+case "$ARCH_RAW" in
+    x86_64)
+        ARCH_LABEL="Intel"
+        ;;
+    arm64|aarch64)
+        ARCH_LABEL="AppleSilicon"
+        ;;
+    *)
+        ARCH_LABEL="$ARCH_RAW"
+        ;;
+esac
+
+DMG_NAME="${APP_NAME}_Online_Setup_macOS_${ARCH_LABEL}.dmg"
 
 # 1. Ensure output directory exists
 mkdir -p "$OUTPUT_DIR"
@@ -67,6 +81,7 @@ echo "SUCCESS! Lightweight Online DMG created:"
 echo "Location: installers/${DMG_NAME}"
 echo "Size: $(du -sh "${OUTPUT_DIR}/${DMG_NAME}" | cut -f1)"
 echo "Checksums: installers/checksums-mac.sha256"
+echo "Architecture: ${ARCH_LABEL} (${ARCH_RAW})"
 echo "Next Step: Distribute this DMG. On first run, your Next.js"
 echo "Startup sequence should download FFmpeg and Python binaries."
 echo "=========================================================="

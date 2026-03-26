@@ -10,10 +10,11 @@ Professional AI-powered audio stem separation tool.
 **File:** `StemSplit_Setup_v0.1.0_x64_Online.exe`
 
 ### macOS
-[![Download for macOS](https://img.shields.io/badge/Download-macOS%20Universal-black?style=for-the-badge&logo=apple)](https://github.com/myaiplug/StemSplit1/releases/latest/download/StemSplit_Online_Setup.dmg)
+[![Download for macOS Intel](https://img.shields.io/badge/Download-macOS%20Intel-black?style=for-the-badge&logo=apple)](https://github.com/myaiplug/StemSplit1/releases/latest/download/StemSplit_Online_Setup_macOS_Intel.dmg)
+[![Download for macOS Apple Silicon](https://img.shields.io/badge/Download-macOS%20Apple%20Silicon-black?style=for-the-badge&logo=apple)](https://github.com/myaiplug/StemSplit1/releases/latest/download/StemSplit_Online_Setup_macOS_AppleSilicon.dmg)
 
-**File:** `StemSplit_Online_Setup.dmg`  
-**Compatible with:** Intel Macs & Apple Silicon (M1/M2/M3)
+**Intel file:** `StemSplit_Online_Setup_macOS_Intel.dmg`  
+**Apple Silicon file:** `StemSplit_Online_Setup_macOS_AppleSilicon.dmg`
 
 ---
 
@@ -51,7 +52,9 @@ Trial vs Pro:
 **No additional software required** - everything is included!
 
 ### macOS Installation
-1. **Download** the `.dmg` file above
+1. **Download** the correct `.dmg` for your Mac CPU:
+	- Intel Mac: `..._macOS_Intel.dmg`
+	- Apple Silicon (M1/M2/M3/M4): `..._macOS_AppleSilicon.dmg`
 2. **Double-click** to mount the disk image
 3. **Drag** StemSplit to the Applications folder
 4. **Right-click** the app and select "Open" (first time only)
@@ -110,6 +113,13 @@ xattr -cr /Applications/StemSplit.app
 ```
 
 Or: **Right-click** app → **"Open"** → Click **"Open"** in dialog
+
+### macOS: "This application is not supported on this Mac"
+This means the installer architecture does not match your CPU.
+
+**Fix:**
+- Intel MacBook/iMac: download `StemSplit_Online_Setup_macOS_Intel.dmg`
+- Apple Silicon (M1/M2/M3/M4): download `StemSplit_Online_Setup_macOS_AppleSilicon.dmg`
 
 ### Still Having Issues?
 - [Installation Guide (Windows)](INSTALLATION_WINDOWS.md)

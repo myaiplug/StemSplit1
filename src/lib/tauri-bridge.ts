@@ -296,8 +296,9 @@ export async function setupPythonEnvironment(
     console.log('[IPC] Python setup complete:', result);
     return result;
   } catch (error) {
-    console.error('[IPC] Python setup failed:', error);
-    throw error;
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error('[IPC] Python setup failed:', detail);
+    throw new Error(detail);
   }
 }
 

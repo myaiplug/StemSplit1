@@ -28,7 +28,8 @@ export default function PythonSetup({ onReady }: PythonSetupProps) {
         onReady();
       }
     } catch (err) {
-      setError('Failed to check Python status');
+      const detail = err instanceof Error ? err.message : String(err);
+      setError(`Failed to check Python status: ${detail}`);
     } finally {
       setIsChecking(false);
     }
@@ -51,7 +52,8 @@ export default function PythonSetup({ onReady }: PythonSetupProps) {
       // Re-check status after install
       await checkStatus();
     } catch (err: any) {
-      setError(err?.message || 'Installation failed');
+      const detail = err instanceof Error ? err.message : String(err);
+      setError(`Installation failed: ${detail}`);
       setIsInstalling(false);
     }
   };
