@@ -22,7 +22,7 @@ SetupIconFile=ss2.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 OutputDir=installers
-OutputBaseFilename=StemSplit_Online_Setup_x64
+OutputBaseFilename=StemSplit_Setup_v{#MyAppVersion}_x64_Online
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 ; Need admin to install Python packages
