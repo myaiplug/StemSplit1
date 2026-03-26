@@ -35,6 +35,10 @@ src-tauri/target/
 *.exe
 *.app
 
+# Generated CI/download artifacts
+ci_artifacts/
+release_assets/
+
 # Python
 __pycache__/
 *.pyc
