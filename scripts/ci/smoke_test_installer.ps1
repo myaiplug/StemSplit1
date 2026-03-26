@@ -47,8 +47,20 @@ function Invoke-SilentUninstall {
 }
 
 $resolvedInstaller = Resolve-InstallerPath -InputPath $InstallerPath
-$mainExe = Join-Path $InstallDir "StemSplit.exe"
+$mainExeCandidates = @(
+    Join-Path $InstallDir "StemSplit.exe",
+    Join-Path $InstallDir "stem-split.exe"
+)
 $uninstaller = Join-Path $InstallDir "unins000.exe"
+
+function Get-InstalledMainExe {
+    foreach ($candidate in $mainExeCandidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+    return $null
+}
 
 $report = [ordered]@{
     platform = "windows"
@@ -94,8 +106,9 @@ try {
 
     # Install + verify
     Invoke-SilentInstall -Path $resolvedInstaller
-    if (-not (Test-Path $mainExe)) {
-        throw "Main executable not found after install: $mainExe"
+    $installedMainExe = Get-InstalledMainExe
+    if (-not $installedMainExe) {
+        throw "Main executable not found after install. Checked: $($mainExeCandidates -join ', ')"
     }
     $report.checks.install_main_exe = $true
 
@@ -109,15 +122,15 @@ try {
     if ($uninstallExit -ne 0) {
         Write-Warning "Uninstall returned non-zero exit code $uninstallExit; validating filesystem state before failing."
     }
-    if (Test-Path $mainExe) {
-        throw "Main executable still present after uninstall: $mainExe"
+    if (Get-InstalledMainExe) {
+        throw "Main executable still present after uninstall. Checked: $($mainExeCandidates -join ', ')"
     }
     $report.checks.uninstall_removed_main_exe = $true
 
     # Reinstall smoke path
     Invoke-SilentInstall -Path $resolvedInstaller
-    if (-not (Test-Path $mainExe)) {
-        throw "Main executable not found after reinstall: $mainExe"
+    if (-not (Get-InstalledMainExe)) {
+        throw "Main executable not found after reinstall. Checked: $($mainExeCandidates -join ', ')"
     }
     $report.checks.reinstall_main_exe = $true
 

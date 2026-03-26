@@ -221,14 +221,42 @@ begin
       // Install PyTorch first (largest package)
       if Exec(PythonDir + '\python.exe', '-m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 --no-warn-script-location', PythonDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
       begin
+        if ResultCode <> 0 then
+        begin
+          MsgBox('Failed to install PyTorch. Error code: ' + IntToStr(ResultCode), mbError, MB_OK);
+          Result := False;
+          PythonInstallPage.Hide;
+          Exit;
+        end;
         PythonInstallPage.SetProgress(70, 100);
+      end
+      else
+      begin
+        MsgBox('Failed to launch Python for PyTorch installation.', mbError, MB_OK);
+        Result := False;
+        PythonInstallPage.Hide;
+        Exit;
       end;
       
       // Install other requirements
       PythonInstallPage.SetText('Installing remaining packages...', '');
       if Exec(PythonDir + '\python.exe', '-m pip install -r "' + ExpandConstant('{app}\requirements.txt') + '" --no-warn-script-location --no-cache-dir', PythonDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
       begin
+        if ResultCode <> 0 then
+        begin
+          MsgBox('Failed to install required packages. Error code: ' + IntToStr(ResultCode), mbError, MB_OK);
+          Result := False;
+          PythonInstallPage.Hide;
+          Exit;
+        end;
         PythonInstallPage.SetProgress(95, 100);
+      end
+      else
+      begin
+        MsgBox('Failed to launch Python for package installation.', mbError, MB_OK);
+        Result := False;
+        PythonInstallPage.Hide;
+        Exit;
       end;
       
       // Cleanup

@@ -2203,7 +2203,15 @@ async fn setup_python_environment(window: tauri::Window) -> Result<String, Strin
         cmd.arg(&getpip_path).arg("--no-warn-script-location");
         cmd.current_dir(&env_dir);
         cmd.creation_flags(CREATE_NO_WINDOW);
-        cmd.output().map_err(|e| format!("Failed to install pip: {}", e))?;
+        let getpip_output = cmd
+            .output()
+            .map_err(|e| format!("Failed to install pip: {}", e))?;
+        if !getpip_output.status.success() {
+            let stderr = String::from_utf8_lossy(&getpip_output.stderr).trim().to_string();
+            let stdout = String::from_utf8_lossy(&getpip_output.stdout).trim().to_string();
+            let details = if !stderr.is_empty() { stderr } else { stdout };
+            return Err(format!("pip bootstrap failed: {}", details));
+        }
         std::fs::remove_file(&getpip_path).ok();
         
         // Install packages
