@@ -141,6 +141,10 @@ begin
   Result := True;
   
   if CurPageID = wpReady then begin
+#ifdef SkipOnlineDownloads
+    Log('SkipOnlineDownloads enabled; skipping online dependency download/install phase.');
+    Exit;
+#endif
     PythonDir := ExpandConstant('{app}\embedded_python');
     PythonZip := ExpandConstant('{tmp}\python_embed.zip');
     GetPipPath := ExpandConstant('{tmp}\get-pip.py');
