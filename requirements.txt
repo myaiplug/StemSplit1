@@ -12,3 +12,4 @@ pedalboard>=0.8.0
 pydub>=0.25.1
 sounddevice
 pyloudnorm
+audio-separator[cpu]

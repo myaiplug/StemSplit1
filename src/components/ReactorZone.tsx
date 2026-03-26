@@ -1382,6 +1382,7 @@ const ReactorZone: React.FC = () => {
                                     >
                                         <option value="demucs">Demucs (V4, Hybrid)</option>
                                         <option value="mdx">MDX-Net (Quality focus)</option>
+                                        <option value="roformer">Roformer (Ultra Quality)</option>
                                         <option value="spleeter">Spleeter (Fast)</option>
                                         <option value="drumsep">Drumsep (Kick/Snare/Tom/Cymbal)</option>
                                     </select>
@@ -1398,10 +1399,11 @@ const ReactorZone: React.FC = () => {
                                         <option value="4">
                                             {splitEngine === 'drumsep' ? '4-Stem (Kick, Snare, Toms, Cymbals)' : '4-Stem (Vocal, Drum, Bass, Other)'}
                                         </option>
-                                        <option value="5" disabled={splitEngine === 'drumsep'}>5-Stem (Adds Piano/Keys)</option>
-                                        <option value="6" disabled={splitEngine === 'spleeter' || splitEngine === 'drumsep'}>6-Stem {splitEngine === 'spleeter' ? '(Not Supported)' : '(Guitar, Piano, etc.)'}</option>
+                                        <option value="5" disabled={splitEngine === 'drumsep' || splitEngine === 'roformer'}>5-Stem (Adds Piano/Keys)</option>
+                                        <option value="6" disabled={splitEngine === 'spleeter' || splitEngine === 'drumsep' || splitEngine === 'roformer'}>6-Stem {splitEngine === 'spleeter' ? '(Not Supported)' : '(Guitar, Piano, etc.)'}</option>
                                     </select>
                                     {splitEngine === 'drumsep' && <span className="text-[10px] text-orange-400 mt-1 block">Drumsep strictly breaks down drums into Kick, Snare, Toms, and Cymbals.</span>}
+                                    {splitEngine === 'roformer' && <span className="text-[10px] text-cyan-400 mt-1 block">Roformer is optimized for 2-stem or 4-stem extraction.</span>}
                                 </div>
                                 
                                 <div>

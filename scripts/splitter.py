@@ -1030,6 +1030,77 @@ class AudioSeparator:
             logger.warning(f"Spectral subtraction error (using original): {e}")
             return vocal_audio
 
+    def _separate_roformer(self, input_file: str, audio: np.ndarray, sr: int, progress_hook=None) -> Dict[str, np.ndarray]:
+        """
+        Perform stem separation using Roformer via the audio-separator python package.
+        """
+        logger.info("Starting Roformer stem separation...")
+        
+        try:
+            from audio_separator.separator import Separator
+            import tempfile
+            
+            # Setup Roformer Separator
+            separator = Separator()
+            
+            # We determine model based on stem count
+            if self.stems_count == 4:
+                # 4-stem model (e.g. BS-Roformer or similar multi-stem model)
+                model_name = 'model_bs_roformer_ep_317_sdr_12.9755.ckpt'
+            else:
+                # Default to 2-stem high quality vocal isolation (MelBand Roformer)
+                model_name = 'mel_band_roformer_kim_ft_erika.ckpt'
+                
+            logger.info(f"Loading Roformer model: {model_name}")
+            separator.load_model(model_filename=model_name)
+            
+            temp_dir = tempfile.mkdtemp(prefix="stemsplit_roformer_")
+            separator.output_dir = temp_dir
+            separator.output_format = 'wav'
+            
+            # Run separation
+            logger.info("Running Roformer inference...")
+            output_files = separator.separate(input_file)
+            
+            stems_data = {}
+            for file_name in output_files:
+                file_path = os.path.join(temp_dir, file_name)
+                # Parse stem name from output. audio-separator usually appends `_(Vocals)` 
+                # or similarly to the filename, dependent on the model.
+                file_lower = file_name.lower()
+                
+                stem_key = 'other'
+                if 'vocal' in file_lower:
+                    stem_key = 'vocals'
+                elif 'instrumental' in file_lower or 'no_vocals' in file_lower:
+                    stem_key = 'instrumental'
+                elif 'bass' in file_lower:
+                    stem_key = 'bass'
+                elif 'drum' in file_lower:
+                    stem_key = 'drums'
+                else:
+                    # Generic fallback matching mechanism
+                    pass
+                
+                logger.info(f"Reading back generated Roformer stem {stem_key} from {file_name}")
+                stem_audio, stem_sr = librosa.load(file_path, sr=sr, mono=False)
+                
+                # Transpose if mono model output to shape expected: (channels, samples)
+                if stem_audio.ndim == 1:
+                    stem_audio = np.vstack([stem_audio, stem_audio])
+                
+                stems_data[stem_key] = stem_audio
+                
+            return stems_data
+            
+        except ImportError:
+            # Fallback wrapper notice
+            logger.error("Roformer engine requires 'audio-separator'. Please run: pip install audio-separator[cpu]")
+            raise RuntimeError("Roformer not properly installed. Try Demucs.")
+        except Exception as e:
+            logger.error(f"Roformer separation failed: {e}", exc_info=True)
+            raise
+
     def _separate_spleeter(self, audio: np.ndarray, sr: int) -> Dict[str, np.ndarray]:
         """
         Perform stem separation using Spleeter.
@@ -1457,6 +1528,8 @@ class AudioSeparator:
             
             if hasattr(self, 'engine') and self.engine == 'mdx':
                 stems = self._separate_mdx(input_file, audio, sr, progress_hook)
+            elif hasattr(self, 'engine') and self.engine == 'roformer':
+                stems = self._separate_roformer(input_file, audio, sr, progress_hook)
             elif hasattr(self, 'engine') and self.engine == 'spleeter':
                 stems = self._separate_spleeter(audio, sr)
             else:

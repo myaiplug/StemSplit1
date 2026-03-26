@@ -293,10 +293,12 @@ const StemPlayer: React.FC<StemPlayerProps> = ({ stemName, filePath, duration, p
             className="w-full"
         >
             {/* Main Container */}
-            <div className={`relative rounded-t-lg ${showFX ? '' : 'rounded-b-lg'} border ${colors.border} overflow-hidden shadow-lg ${colors.glow}`}
+            <div className={`relative rounded-t-lg ${showFX ? '' : 'rounded-b-lg'} border ${colors.border} overflow-hidden shadow-lg ${colors.glow} transition-all duration-300`}
                  style={{
                      background: 'linear-gradient(135deg, rgba(2,6,23,0.92) 0%, rgba(8,15,40,0.95) 50%, rgba(2,6,23,0.92) 100%)',
                      backdropFilter: 'blur(16px)',
+                     boxShadow: (isPlaying && !isMuted) ? `0 0 25px ${colors.glow.replace('shadow-', '').split('/')[0]}30` : undefined,
+                     borderColor: (isPlaying && !isMuted) ? colors.wave : undefined,
                  }}
             >
                 {/* Top accent line */}
@@ -487,7 +489,7 @@ const StemPlayer: React.FC<StemPlayerProps> = ({ stemName, filePath, duration, p
                             min={0} max={1} step={0.01}
                             value={isMuted ? 0 : volume}
                             onChange={e => { setVolume(parseFloat(e.target.value)); setIsMuted(false); }}
-                            className="w-12 h-1 appearance-none bg-slate-800 rounded-full outline-none cursor-pointer stem-vol-slider"
+                            className="w-16 h-1 appearance-none bg-slate-800 rounded-full outline-none cursor-pointer pro-fader"
                             style={{
                                 background: `linear-gradient(to right, ${colors.wave} 0%, ${colors.wave} ${(isMuted ? 0 : volume) * 100}%, #1e293b ${(isMuted ? 0 : volume) * 100}%, #1e293b 100%)`,
                             }}
