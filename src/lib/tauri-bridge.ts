@@ -313,3 +313,42 @@ export async function onPythonSetupProgress(
   });
 }
 
+
+export interface LicenseInfo {
+  status: string;
+  key: string | null;
+  email: string | null;
+  error?: string;
+  limitations?: TrialLimitations;
+}
+
+export interface TrialLimitations {
+  max_stems: number;
+}
+
+export async function getLicenseStatus(): Promise<LicenseInfo> {
+  return { status: 'free', key: null, email: null };
+}
+
+export async function activateLicense(key: string, email: string): Promise<LicenseInfo> {
+  return { status: 'pro', key, email };
+}
+
+export async function deactivateLicense(): Promise<LicenseInfo> {
+  return { status: 'free', key: null, email: null };
+}
+
+export function isPro(license: LicenseInfo | null): boolean {
+  return license?.status === 'pro';
+}
+
+export function isTrial(license: LicenseInfo | null): boolean {
+  return license?.status === 'free';
+}
+
+export function hasFeature(license: LicenseInfo | null, feature: string): boolean {
+  if (isPro(license)) return true;
+  if (feature === '2-stem') return true;
+  return false;
+}
+

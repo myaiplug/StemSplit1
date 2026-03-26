@@ -14,12 +14,18 @@ const PythonSetup = dynamic(
   { ssr: false }
 );
 
+const UpdateModal = dynamic(
+  () => import('@/components/UpdateModal'),
+  { ssr: false }
+);
+
 export default function Home() {
   const [isPythonReady, setIsPythonReady] = useState(false);
 
   return (
     <main>
       <PythonSetup onReady={() => setIsPythonReady(true)} />
+      <UpdateModal />
       <ReactorZone />
     </main>
   );

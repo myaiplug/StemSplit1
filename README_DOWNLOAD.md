@@ -65,16 +65,20 @@ Trial vs Pro:
 
 ## 💻 System Requirements
 
+### Size Information
+* **Installer Size:** Super light at `~5 MB` (We use an online-installer format so you download instantly).
+* **Installation Size:** Requires internet connection during install to fetch Python, FFmpeg, and AI neural network models (like PyTorch). The completed installation footprint is approximately `3.5 GB` to `5 GB` on your hard drive depending on which separation models you initialize.
+
 ### Windows
 - Windows 10 (1809+) or Windows 11
 - 8 GB RAM minimum (16 GB recommended)
-- 10 GB free disk space
+- ~5 GB free disk space
 - x64 processor
 
 ### macOS
 - macOS 10.13 High Sierra or later
 - 8 GB RAM minimum (16 GB recommended)
-- 10 GB free disk space
+- ~5 GB free disk space
 - Intel or Apple Silicon processor
 
 ---
