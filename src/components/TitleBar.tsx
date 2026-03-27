@@ -1,8 +1,10 @@
+'use client';
 // src/components/TitleBar.tsx
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { appWindow } from '@tauri-apps/api/window';
 import { message } from '@tauri-apps/api/dialog';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useLicense } from '@/contexts/LicenseContext';
 
 // --- Quick Tools Menu Items ---
 interface QuickToolItem {
@@ -115,6 +117,7 @@ interface TitleBarProps {
 }
 
 const TitleBar: React.FC<TitleBarProps> = ({ onToolTrigger }) => {
+    const { isPro } = useLicense();
     const [isTauri, setIsTauri] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -219,16 +222,25 @@ const TitleBar: React.FC<TitleBarProps> = ({ onToolTrigger }) => {
                 </div>
 
                 {/* License Button Area */}
-                <div className="flex items-center no-drag z-[101]">
+                <div className="flex items-center no-drag z-[101] mr-4 relative group">
+                    {/* Glowing underlay */}
+                    <div className={`absolute inset-0 blur-md rounded-full transition-all duration-300 ${isPro ? 'bg-emerald-500/20 group-hover:bg-emerald-500/40' : 'bg-amber-500/20 group-hover:bg-amber-500/40'}`} />
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
                             window.dispatchEvent(new CustomEvent('open-license-modal'));
                         }}
-                        className="px-3 py-1 mr-4 rounded bg-amber-500/20 border border-amber-500/30 text-amber-400 hover:bg-amber-500 hover:text-slate-900 transition-all text-[10px] font-bold uppercase tracking-wider shadow-[0_0_10px_rgba(245,158,11,0.2)] hover:shadow-[0_0_15px_rgba(245,158,11,0.6)] cursor-pointer"
-                        title="Manage License"
+                        className={`relative px-4 py-1.5 rounded-sm bg-slate-900 border transition-all duration-300 text-[10px] font-mono font-bold uppercase tracking-[0.2em] cursor-pointer overflow-hidden flex items-center gap-2 ${
+                            isPro 
+                            ? 'border-emerald-500/50 text-emerald-400 hover:bg-emerald-500 hover:border-emerald-400 hover:text-slate-950 shadow-[0_0_10px_rgba(16,185,129,0.1)] hover:shadow-[0_0_20px_rgba(16,185,129,0.6)]' 
+                            : 'border-amber-500/50 text-amber-400 hover:bg-amber-500 hover:border-amber-400 hover:text-slate-950 shadow-[0_0_10px_rgba(245,158,11,0.1)] hover:shadow-[0_0_20px_rgba(245,158,11,0.6)]'
+                        }`}
+                        title="Manage License & Upgrades"
                     >
-                        PRO / UPGRADE
+                        {/* Scanline overlay inside button */}
+                        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:100%_2px] pointer-events-none opacity-50 group-hover:opacity-20" />
+                        <span className={`relative z-10 w-2 h-2 rounded-full shadow-[0_0_5px_currentColor] ${isPro ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`}></span>
+                        <span className="relative z-10">{isPro ? 'PRO ACTIVE' : 'UPGRADE TO PRO'}</span>
                     </button>
                 </div>
 
