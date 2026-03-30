@@ -1259,39 +1259,43 @@ impl Drop for RunGuard {
     }
 }
  
- fn resolve_splitter_script_path() -> std::path::PathBuf {
-     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
- 
-     let mut candidates: Vec<std::path::PathBuf> = Vec::new();
- 
-     if let Some(project_root) = manifest_dir.parent() {
-         candidates.push(project_root.join("scripts").join("splitter.py"));
-     }
- 
-     candidates.push(manifest_dir.join("scripts").join("splitter.py"));
- 
-     if let Ok(current_dir) = std::env::current_dir() {
-         candidates.push(current_dir.join("scripts").join("splitter.py"));
-     }
- 
-     if let Ok(exe_path) = std::env::current_exe() {
-         if let Some(exe_dir) = exe_path.parent() {
-             candidates.push(exe_dir.join("scripts").join("splitter.py"));
-         }
-     }
- 
-     if let Some(existing) = candidates.iter().find(|path| path.exists()) {
-         return existing.clone();
-     }
- 
-     if let Some(project_root) = manifest_dir.parent() {
-         return project_root.join("scripts").join("splitter.py");
-     }
- 
-     std::path::PathBuf::from("scripts").join("splitter.py")
+fn resolve_python_script_path(script_name: &str) -> std::path::PathBuf {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+
+    if let Some(project_root) = manifest_dir.parent() {
+        candidates.push(project_root.join("scripts").join(script_name));
+    }
+
+    candidates.push(manifest_dir.join("scripts").join(script_name));
+
+    if let Ok(current_dir) = std::env::current_dir() {
+        candidates.push(current_dir.join("scripts").join(script_name));
+    }
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join("scripts").join(script_name));
+        }
+    }
+
+    if let Some(existing) = candidates.iter().find(|path| path.exists()) {
+        return existing.clone();
+    }
+
+    if let Some(project_root) = manifest_dir.parent() {
+        return project_root.join("scripts").join(script_name);
+    }
+
+    std::path::PathBuf::from("scripts").join(script_name)
  }
 
 fn resolve_python_path() -> String {
+    if let Some(exe) = get_python_executable() {
+        return exe.to_string_lossy().to_string();
+    }
+
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut candidates: Vec<std::path::PathBuf> = Vec::new();
 
@@ -1527,7 +1531,7 @@ async fn execute_splice(
     };
 
     // Build path to Python script
-    let script_path = resolve_splitter_script_path();
+    let script_path = resolve_python_script_path("splitter.py");
 
     let splitter_script = script_path.to_string_lossy().to_string();
 
@@ -1809,17 +1813,14 @@ async fn apply_stem_fx(
     }
 
     // Resolve apply_fx.py script path
-    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let script_path = if let Some(root) = manifest_dir.parent() {
-        root.join("scripts").join("apply_fx.py")
-    } else {
-        manifest_dir.join("scripts").join("apply_fx.py")
-    };
+    let script_path = resolve_python_script_path("apply_fx.py");
 
     if !script_path.exists() {
         return Err(format!("apply_fx.py not found at: {}", script_path.display()));
     }
 
+    let work_dir = script_path.parent().unwrap().parent().unwrap();
+    
     let python_exe = resolve_python_path();
     let mut cmd = Command::new(&python_exe);
     cmd.args(&[
@@ -1831,7 +1832,7 @@ async fn apply_stem_fx(
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
     // Ensure we run in project root so relative imports (if any) or file paths work as expected
-    .current_dir(manifest_dir.parent().unwrap_or(&manifest_dir));
+    .current_dir(work_dir);
 
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
@@ -1860,17 +1861,14 @@ async fn preview_vst_plugin(
     audio_path: String,
 ) -> Result<String, String> {
     // Resolve preview_vst.py script path
-    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let script_path = if let Some(root) = manifest_dir.parent() {
-        root.join("scripts").join("preview_vst.py")
-    } else {
-        manifest_dir.join("scripts").join("preview_vst.py")
-    };
+    let script_path = resolve_python_script_path("preview_vst.py");
 
     if !script_path.exists() {
         return Err(format!("preview_vst.py not found at: {}", script_path.display()));
     }
 
+    let work_dir = script_path.parent().unwrap().parent().unwrap();
+    
     let python_exe = resolve_python_path();
     let mut cmd = Command::new(&python_exe);
     cmd.args(&[
@@ -1880,7 +1878,7 @@ async fn preview_vst_plugin(
     ])
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
-    .current_dir(manifest_dir.parent().unwrap_or(&manifest_dir));
+    .current_dir(work_dir);
 
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
@@ -1974,46 +1972,67 @@ pub struct PythonStatus {
 }
 
 fn get_python_env_dir() -> std::path::PathBuf {
-    // Check multiple possible locations for embedded_python
-    let possible_paths: Vec<std::path::PathBuf> = {
-        let mut paths = Vec::new();
-        
-        // 1. Current working directory (project root in dev mode)
-        if let Ok(cwd) = std::env::current_dir() {
-            paths.push(cwd.join("embedded_python"));
+    let mut possible_paths: Vec<std::path::PathBuf> = Vec::new();
+    
+    // 1. Current working directory (project root in dev mode)
+    if let Ok(cwd) = std::env::current_dir() {
+        possible_paths.push(cwd.join("embedded_python"));
+    }
+    
+    // 2. Relative to executable
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            // Production: beside the exe
+            #[cfg(target_os = "windows")]
+            possible_paths.push(exe_dir.join("embedded_python"));
+            #[cfg(target_os = "macos")]
+            possible_paths.push(exe_dir.join("../Resources/python_env"));
+            #[cfg(target_os = "linux")]
+            possible_paths.push(exe_dir.join("python_env"));
+            
+            // Dev mode: project root
+            possible_paths.push(exe_dir.join("../../../embedded_python"));
+            possible_paths.push(exe_dir.join("../../embedded_python"));
         }
-        
-        // 2. Relative to executable
-        if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(exe_dir) = exe_path.parent() {
-                // Production: beside the exe
-                #[cfg(target_os = "windows")]
-                paths.push(exe_dir.join("embedded_python"));
-                #[cfg(target_os = "macos")]
-                paths.push(exe_dir.join("../Resources/python_env"));
-                #[cfg(target_os = "linux")]
-                paths.push(exe_dir.join("python_env"));
-                
-                // Dev mode: project root (exe is in src-tauri/target/debug or release)
-                // Go up from src-tauri/target/debug -> src-tauri/target -> src-tauri -> project_root
-                paths.push(exe_dir.join("../../../embedded_python"));
-                paths.push(exe_dir.join("../../embedded_python"));
-            }
-        }
-        
-        paths
-    };
+    }
+
+    // 3. User local app data (for writable downloads)
+    if let Some(mut app_data) = dirs::data_local_dir() {
+        app_data.push("StemSplit");
+        app_data.push("embedded_python");
+        possible_paths.push(app_data.clone());
+    } else if let Ok(local_appdata) = std::env::var("LOCALAPPDATA") {
+        let mut app_data = std::path::PathBuf::from(local_appdata);
+        app_data.push("StemSplit");
+        app_data.push("embedded_python");
+        possible_paths.push(app_data);
+    }
     
     // Return first existing path
-    for path in possible_paths {
+    for path in &possible_paths {
+        #[cfg(target_os = "windows")]
         let check_path = path.join("python.exe");
+        #[cfg(not(target_os = "windows"))]
+        let check_path = path.join("bin").join("python3");
+        
         if check_path.exists() {
-            return path;
+            return path.clone();
         }
     }
     
-    // Fallback
-    std::path::PathBuf::from("embedded_python")
+    // Fallback: Use AppData if available, otherwise relative path
+    if let Some(mut app_data) = dirs::data_local_dir() {
+        app_data.push("StemSplit");
+        app_data.push("embedded_python");
+        app_data
+    } else if let Ok(local_appdata) = std::env::var("LOCALAPPDATA") {
+        let mut app_data = std::path::PathBuf::from(local_appdata);
+        app_data.push("StemSplit");
+        app_data.push("embedded_python");
+        app_data
+    } else {
+        std::path::PathBuf::from("embedded_python")
+    }
 }
 
 fn get_python_executable() -> Option<std::path::PathBuf> {

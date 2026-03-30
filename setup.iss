@@ -18,8 +18,10 @@ DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 ; The following line to use the icon
 SetupIconFile=ss2.ico
-Compression=lzma2/ultra64
+Compression=lzma2/normal
 SolidCompression=yes
+DiskSpanning=yes
+DiskSliceSize=max
 OutputDir=installers
 OutputBaseFilename=StemSplit_Setup_v0.1.0_x64
 ; "ArchitecturesAllowed=x64" specifies that Setup cannot run on anything but x64.

@@ -42,15 +42,24 @@ npm run build
 
 # 3. Build Tauri App (Without injecting Python dependencies or models)
 echo "[2/3] Building Tauri React frontend & rust backend..."
-# npm run tauri build creates the .app wrapper
-npm run tauri build
 
-APP_BUNDLE="src-tauri/target/release/bundle/macos/${APP_NAME}.app"
+# Ensure we have both architectures installed for Universal Binary (Intel + Apple Silicon)
+rustup target add aarch64-apple-darwin
+rustup target add x86_64-apple-darwin
+
+# npm run tauri build creates the .app wrapper
+npm run tauri build -- --target universal-apple-darwin
+
+APP_BUNDLE="src-tauri/target/universal-apple-darwin/release/bundle/macos/${APP_NAME}.app"
 
 # 3. Validation
 if [ ! -d "$APP_BUNDLE" ]; then
-    echo "Error: App bundle not found! Build failed."
-    exit 1
+    echo "Warning: Universal bundle not found, falling back to standard release path."
+    APP_BUNDLE="src-tauri/target/release/bundle/macos/${APP_NAME}.app"
+    if [ ! -d "$APP_BUNDLE" ]; then
+        echo "Error: App bundle not found! Build failed."
+        exit 1
+    fi
 fi
 
 echo "[3/3] Packing into a lightweight DMG..."

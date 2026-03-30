@@ -32,7 +32,7 @@ jobs:
           # runner availability, the Intel job is cancelled before it starts.
           # Re-enable Intel CI when dedicated/paid macOS runner capacity exists.
           - runner: macos-14
-            archLabel: AppleSilicon
+            archLabel: Universal
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
 
