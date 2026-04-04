@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 from dataclasses import dataclass
 from typing import List
 
@@ -27,11 +28,37 @@ def _read_text(path: str) -> str:
         return f.read()
 
 
+def _summarize_output(stdout: str, stderr: str, max_len: int = 500) -> str:
+    parts = []
+    if stdout.strip():
+        parts.append(f"stdout: {stdout.strip()}")
+    if stderr.strip():
+        parts.append(f"stderr: {stderr.strip()}")
+
+    if not parts:
+        return "no output"
+
+    combined = " | ".join(parts)
+    if len(combined) <= max_len:
+        return combined
+    return combined[: max_len - 3] + "..."
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--json-out", required=True)
     parser.add_argument("--md-out", required=True)
+    parser.add_argument(
+        "--run-billing-smoke",
+        action="store_true",
+        help="Run billing webhook smoke checks as part of preflight.",
+    )
+    parser.add_argument(
+        "--billing-smoke-command",
+        default="npm run billing:test:webhooks",
+        help="Command used for billing smoke checks when --run-billing-smoke is enabled.",
+    )
     args = parser.parse_args()
 
     root = os.path.abspath(args.repo_root)
@@ -115,6 +142,46 @@ def main() -> int:
             details="all local evidence reports present" if not missing_evidence else "missing: " + ", ".join(missing_evidence),
         )
     )
+
+    if args.run_billing_smoke:
+        try:
+            result = subprocess.run(
+                args.billing_smoke_command,
+                cwd=root,
+                shell=True,
+                capture_output=True,
+                text=True,
+            )
+            checks.append(
+                Check(
+                    name="billing_webhook_smoke",
+                    passed=result.returncode == 0,
+                    severity="error",
+                    details=(
+                        f"billing smoke command passed ({args.billing_smoke_command})"
+                        if result.returncode == 0
+                        else f"billing smoke command failed ({args.billing_smoke_command}) | {_summarize_output(result.stdout, result.stderr)}"
+                    ),
+                )
+            )
+        except Exception as exc:
+            checks.append(
+                Check(
+                    name="billing_webhook_smoke",
+                    passed=False,
+                    severity="error",
+                    details=f"billing smoke execution error: {exc}",
+                )
+            )
+    else:
+        checks.append(
+            Check(
+                name="billing_webhook_smoke",
+                passed=True,
+                severity="warn",
+                details="skipped (enable with --run-billing-smoke)",
+            )
+        )
 
     hard_fail = any((not c.passed and c.severity == "error") for c in checks)
 

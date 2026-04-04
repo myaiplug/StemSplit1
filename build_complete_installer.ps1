@@ -31,7 +31,7 @@ function Invoke-PythonCommand {
             continue
         }
 
-        & $candidate.Exe @($candidate.Prefix + $Arguments)
+        & $candidate.Exe @($candidate.Prefix + $Arguments) | Out-Host
         return $LASTEXITCODE
     }
 
@@ -132,16 +132,28 @@ if ($PackageAssets) {
 Write-Host "[1/6] Setting up environment..." -ForegroundColor Yellow
 if ($Online) {
     Write-Host "✓ Skipping embedded Python setup for online installer" -ForegroundColor Green
-} elseif (-not (Test-Path "embedded_python\python.exe")) {
-    Write-Host "Creating environment (this may take a few minutes)..." -ForegroundColor Yellow
-    .\setup_embedded_python.ps1
+} else {
+    Write-Host "Ensuring embedded Python runtime is healthy (repair mode)..." -ForegroundColor Yellow
+    .\setup_embedded_python.ps1 -RepairIfNeeded
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to setup environment"
+        Write-Error "Failed to setup/repair embedded environment"
         exit $LASTEXITCODE
     }
-    Write-Host "✓ Environment Ready" -ForegroundColor Green
-} else {
-    Write-Host "✓ Environment already exists" -ForegroundColor Green
+
+    $requiredImports = @("torch", "demucs", "librosa", "soundfile", "numpy")
+    $missingImports = @()
+    foreach ($module in $requiredImports) {
+        & "embedded_python\python.exe" -c "import $module" *> $null
+        if ($LASTEXITCODE -ne 0) {
+            $missingImports += $module
+        }
+    }
+    if ($missingImports.Count -gt 0) {
+        Write-Error "Embedded runtime is still missing required modules: $($missingImports -join ', ')"
+        exit 1
+    }
+
+    Write-Host "✓ Embedded environment verified" -ForegroundColor Green
 }
 
 # Step 2: Build Next.js app

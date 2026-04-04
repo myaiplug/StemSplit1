@@ -11,7 +11,7 @@ mod downloader;
 
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::{Arc, Mutex};
@@ -36,6 +36,10 @@ const SECURITY_WEBHOOK_RETRY_DELAY_MS: u64 = 900;
 
 // Your Gumroad product permalink/ID
 const GUMROAD_PRODUCT_ID: &str = "rQTVqaHxdUm5urq5oJKQhw==";
+const LICENSE_SOURCE_GUMROAD: &str = "gumroad";
+const LICENSE_SOURCE_MANAGED_PRO: &str = "managed_pro";
+const LICENSE_SOURCE_DEV_BYPASS: &str = "dev_bypass";
+const LICENSE_SOURCE_REMOTE: &str = "remote_license_server";
 
 // How often to re-verify license online (in seconds) - 7 days
 const LICENSE_RECHECK_INTERVAL: i64 = 7 * 24 * 60 * 60;
@@ -100,6 +104,255 @@ struct StoredLicense {
     activated_at: String,
     last_verified: i64,  // Unix timestamp of last online verification
     is_valid: bool,
+    #[serde(default = "default_license_source")]
+    source: String,
+}
+
+fn default_license_source() -> String {
+    LICENSE_SOURCE_GUMROAD.to_string()
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+struct ManagedProUser {
+    email: String,
+    password_sha256: String,
+    enabled: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+struct ManagedProUsersDb {
+    users: Vec<ManagedProUser>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+struct RemoteLicenseValidationResponse {
+    #[serde(default)]
+    recognized: bool,
+    #[serde(default)]
+    valid: bool,
+    email: Option<String>,
+    purchase_date: Option<String>,
+    plan: Option<String>,
+    features: Option<Vec<String>>,
+    error: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+struct FreeUserRecord {
+    username: String,
+    email: String,
+    password_sha256: String,
+    created_at: String,
+    last_login_at: String,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+struct FreeUsersDb {
+    users: Vec<FreeUserRecord>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+struct FreeUserSession {
+    username: String,
+    email: String,
+    signed_in_at: String,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+struct AuthProfile {
+    username: String,
+    email: String,
+    created_at: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+struct AuthResult {
+    success: bool,
+    profile: Option<AuthProfile>,
+    onboarding_email_sent: bool,
+    message: String,
+    error: Option<String>,
+}
+
+fn get_free_users_path() -> std::path::PathBuf {
+    let data_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")))
+        .join("StemSplit");
+
+    std::fs::create_dir_all(&data_dir).ok();
+    data_dir.join("free_users.json")
+}
+
+fn get_free_session_path() -> std::path::PathBuf {
+    let data_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")))
+        .join("StemSplit");
+
+    std::fs::create_dir_all(&data_dir).ok();
+    data_dir.join("free_session.json")
+}
+
+fn load_or_initialize_free_users_db() -> FreeUsersDb {
+    let db_path = get_free_users_path();
+
+    if let Ok(content) = std::fs::read_to_string(&db_path) {
+        if let Ok(parsed) = serde_json::from_str::<FreeUsersDb>(&content) {
+            return parsed;
+        }
+    }
+
+    let defaults = FreeUsersDb::default();
+    let _ = std::fs::write(&db_path, serde_json::to_string_pretty(&defaults).unwrap_or_else(|_| "{\"users\":[]}".to_string()));
+    defaults
+}
+
+fn save_free_users_db(db: &FreeUsersDb) -> Result<(), String> {
+    let db_path = get_free_users_path();
+    std::fs::write(&db_path, serde_json::to_string_pretty(db).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("Failed to save free users DB: {}", e))
+}
+
+fn hash_free_user_password(email: &str, password: &str) -> String {
+    let canonical = format!("{}::{}", email.trim().to_lowercase(), password);
+    sha256_hex(&canonical)
+}
+
+fn normalize_username(username: &str) -> String {
+    username.trim().to_string()
+}
+
+fn normalize_email(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+
+fn save_free_session(session: &FreeUserSession) -> Result<(), String> {
+    let path = get_free_session_path();
+    std::fs::write(path, serde_json::to_string_pretty(session).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("Failed to save user session: {}", e))
+}
+
+fn load_free_session() -> Option<FreeUserSession> {
+    let path = get_free_session_path();
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<FreeUserSession>(&content).ok())
+}
+
+fn clear_free_session() {
+    let path = get_free_session_path();
+    let _ = std::fs::remove_file(path);
+}
+
+fn send_onboarding_email(email: &str, username: &str) -> Result<bool, String> {
+    let resend_key = std::env::var("RESEND_API_KEY").ok().unwrap_or_default();
+    let from_addr = std::env::var("STEMSPLIT_ONBOARDING_FROM").ok().unwrap_or_default();
+
+    if resend_key.trim().is_empty() || from_addr.trim().is_empty() {
+        return Ok(false);
+    }
+
+    let body = serde_json::json!({
+        "from": from_addr,
+        "to": [email],
+        "subject": "Welcome to StemSplit",
+        "html": format!(
+            "<div style='font-family:Arial,sans-serif;line-height:1.5'><h2>Welcome to StemSplit, {}.</h2><p>Your free account is ready.</p><p>You can start with Spleeter 2-stem splits and upgrade anytime from inside the app.</p><p>Thanks for joining.</p></div>",
+            username
+        )
+    });
+
+    let client = reqwest::blocking::Client::new();
+    let response = client
+        .post("https://api.resend.com/emails")
+        .header("Authorization", format!("Bearer {}", resend_key))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .map_err(|e| format!("Failed to call onboarding email API: {}", e))?;
+
+    if response.status().is_success() {
+        Ok(true)
+    } else {
+        Err(format!("Onboarding email API returned status {}", response.status()))
+    }
+}
+
+fn get_managed_pro_users_path() -> std::path::PathBuf {
+    let data_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")))
+        .join("StemSplit");
+
+    std::fs::create_dir_all(&data_dir).ok();
+    data_dir.join("managed_pro_users.json")
+}
+
+fn default_managed_pro_users_db() -> ManagedProUsersDb {
+    ManagedProUsersDb {
+        users: vec![
+            ManagedProUser {
+                email: "myaiplug.com@gmail.com".to_string(),
+                password_sha256: "eb4634018c19c229654d3a740c97415043e1d365dff686962eb5edf406a907c0".to_string(),
+                enabled: true,
+            },
+            ManagedProUser {
+                email: "noniespaceghost@gmail.com".to_string(),
+                password_sha256: "81e0c2a2c5f2c88de31ab59d3fb1b1817c6cacb6f4ba4e1dce7194d28078096b".to_string(),
+                enabled: true,
+            },
+        ],
+    }
+}
+
+fn load_or_initialize_managed_pro_users_db() -> ManagedProUsersDb {
+    let db_path = get_managed_pro_users_path();
+
+    if let Ok(content) = std::fs::read_to_string(&db_path) {
+        if let Ok(parsed) = serde_json::from_str::<ManagedProUsersDb>(&content) {
+            return parsed;
+        }
+    }
+
+    let defaults = default_managed_pro_users_db();
+    let _ = std::fs::write(&db_path, serde_json::to_string_pretty(&defaults).unwrap_or_else(|_| "{\"users\":[]}".to_string()));
+    defaults
+}
+
+fn sha256_hex(value: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    let mut out = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        out.push_str(&format!("{:02x}", byte));
+    }
+    out
+}
+
+fn verify_managed_pro_credentials(email: &str, password: &str) -> bool {
+    let normalized_email = email.trim().to_lowercase();
+    let password_hash = sha256_hex(password);
+    let db = load_or_initialize_managed_pro_users_db();
+
+    db.users.iter().any(|user| {
+        user.enabled
+            && user.email.trim().eq_ignore_ascii_case(&normalized_email)
+            && user.password_sha256 == password_hash
+    })
+}
+
+fn has_managed_pro_email(email: &str) -> bool {
+    let normalized_email = email.trim().to_lowercase();
+    let db = load_or_initialize_managed_pro_users_db();
+    db.users
+        .iter()
+        .any(|user| user.email.trim().eq_ignore_ascii_case(&normalized_email))
+}
+
+fn is_managed_pro_email_enabled(email: &str) -> bool {
+    let normalized_email = email.trim().to_lowercase();
+    let db = load_or_initialize_managed_pro_users_db();
+
+    db.users.iter().any(|user| {
+        user.enabled && user.email.trim().eq_ignore_ascii_case(&normalized_email)
+    })
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
@@ -876,6 +1129,54 @@ fn verify_with_gumroad(license_key: &str) -> Result<(bool, Option<String>, Optio
     }
 }
 
+fn get_license_server_validate_url() -> Option<String> {
+    let configured = std::env::var("STEMSPLIT_LICENSE_SERVER_URL")
+        .ok()
+        .or_else(|| std::env::var("NEXT_PUBLIC_LICENSE_API_URL").ok())?
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+
+    if configured.is_empty() {
+        return None;
+    }
+
+    if configured.ends_with("/api/licenses/validate") {
+        Some(configured)
+    } else {
+        Some(format!("{}/api/licenses/validate", configured))
+    }
+}
+
+fn verify_with_remote_license_server(
+    license_key: &str,
+    email: &str,
+) -> Result<Option<RemoteLicenseValidationResponse>, String> {
+    let Some(url) = get_license_server_validate_url() else {
+        return Ok(None);
+    };
+
+    let client = reqwest::blocking::Client::new();
+    let response = client
+        .post(url)
+        .json(&serde_json::json!({
+            "email": email,
+            "licenseKey": license_key,
+        }))
+        .send()
+        .map_err(|e| format!("Remote license server error: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Remote license server returned status {}", response.status()));
+    }
+
+    let payload = response
+        .json::<RemoteLicenseValidationResponse>()
+        .map_err(|e| format!("Remote license server response invalid: {}", e))?;
+
+    Ok(Some(payload))
+}
+
 #[tauri::command]
 fn get_license_status() -> LicenseInfo {
     let license_path = get_license_path();
@@ -923,6 +1224,114 @@ fn get_license_status() -> LicenseInfo {
     
     let now = chrono::Utc::now().timestamp();
     let needs_reverify = (now - stored.last_verified) > LICENSE_RECHECK_INTERVAL;
+
+    if stored.source == LICENSE_SOURCE_REMOTE {
+        if needs_reverify {
+            match verify_with_remote_license_server(&stored.license_key, &stored.email) {
+                Ok(Some(remote)) if remote.valid => {
+                    let updated = StoredLicense {
+                        license_key: stored.license_key.clone(),
+                        email: remote.email.clone().unwrap_or_else(|| stored.email.clone()),
+                        activated_at: remote.purchase_date.clone().unwrap_or_else(|| stored.activated_at.clone()),
+                        last_verified: now,
+                        is_valid: true,
+                        source: LICENSE_SOURCE_REMOTE.to_string(),
+                    };
+                    let _ = std::fs::write(&license_path, serde_json::to_string_pretty(&updated).unwrap());
+
+                    return LicenseInfo {
+                        is_valid: true,
+                        is_trial: false,
+                        email: Some(updated.email),
+                        purchase_date: Some(updated.activated_at),
+                        license_key: Some("REMOTE-****-ACCESS".into()),
+                        features: remote.features.unwrap_or_else(get_full_features),
+                        limitations: get_no_limitations(),
+                        error: None,
+                    };
+                }
+                Ok(Some(remote)) => {
+                    return LicenseInfo {
+                        is_valid: false,
+                        is_trial: true,
+                        email: Some(stored.email),
+                        purchase_date: None,
+                        license_key: None,
+                        features: get_trial_features(),
+                        limitations: get_trial_limitations(),
+                        error: Some(remote.error.unwrap_or_else(|| "Remote access credential rejected".into())),
+                    };
+                }
+                Ok(None) | Err(_) => {
+                    let grace_period = 30 * 24 * 60 * 60;
+                    if (now - stored.last_verified) < grace_period && stored.is_valid {
+                        return LicenseInfo {
+                            is_valid: true,
+                            is_trial: false,
+                            email: Some(stored.email),
+                            purchase_date: Some(stored.activated_at),
+                            license_key: Some("REMOTE-****-ACCESS".into()),
+                            features: get_full_features(),
+                            limitations: get_no_limitations(),
+                            error: Some("Remote license server unavailable, using cached access".into()),
+                        };
+                    }
+                }
+            }
+        }
+
+        if stored.is_valid {
+            return LicenseInfo {
+                is_valid: true,
+                is_trial: false,
+                email: Some(stored.email),
+                purchase_date: Some(stored.activated_at),
+                license_key: Some("REMOTE-****-ACCESS".into()),
+                features: get_full_features(),
+                limitations: get_no_limitations(),
+                error: None,
+            };
+        }
+    }
+
+    if stored.source == LICENSE_SOURCE_MANAGED_PRO {
+        if stored.is_valid && is_managed_pro_email_enabled(&stored.email) {
+            return LicenseInfo {
+                is_valid: true,
+                is_trial: false,
+                email: Some(stored.email),
+                purchase_date: Some(stored.activated_at),
+                license_key: Some("MANAGED-****-PRO".into()),
+                features: get_full_features(),
+                limitations: get_no_limitations(),
+                error: None,
+            };
+        }
+
+        return LicenseInfo {
+            is_valid: false,
+            is_trial: true,
+            email: Some(stored.email),
+            purchase_date: None,
+            license_key: None,
+            features: get_trial_features(),
+            limitations: get_trial_limitations(),
+            error: Some("Managed Pro access has been disabled for this account".into()),
+        };
+    }
+
+    if stored.source == LICENSE_SOURCE_DEV_BYPASS && stored.is_valid {
+        return LicenseInfo {
+            is_valid: true,
+            is_trial: false,
+            email: Some(stored.email),
+            purchase_date: Some(stored.activated_at),
+            license_key: Some("DEV-****-ACCESS".into()),
+            features: get_full_features(),
+            limitations: get_no_limitations(),
+            error: None,
+        };
+    }
     
     // If we need to re-verify online
     if needs_reverify {
@@ -936,6 +1345,7 @@ fn get_license_status() -> LicenseInfo {
                         activated_at: stored.activated_at.clone(),
                         last_verified: now,
                         is_valid: true,
+                        source: LICENSE_SOURCE_GUMROAD.to_string(),
                     };
                     let _ = std::fs::write(&license_path, serde_json::to_string_pretty(&updated).unwrap());
                     
@@ -1048,6 +1458,7 @@ fn activate_license(license_key: String, email: String) -> LicenseInfo {
             activated_at: now.to_rfc3339(),
             last_verified: now.timestamp() + (365 * 24 * 60 * 60), // Valid for 1 year
             is_valid: true,
+            source: LICENSE_SOURCE_DEV_BYPASS.to_string(),
         };
         
         let license_path = get_license_path();
@@ -1062,6 +1473,108 @@ fn activate_license(license_key: String, email: String) -> LicenseInfo {
             features: get_full_features(),
             limitations: get_no_limitations(),
             error: None,
+        };
+    }
+
+    if verify_managed_pro_credentials(&email_normalized, &license_key) {
+        let now = chrono::Utc::now();
+        let stored = StoredLicense {
+            license_key: "MANAGED-PRO-AUTH".to_string(),
+            email: email_normalized.clone(),
+            activated_at: now.to_rfc3339(),
+            last_verified: now.timestamp(),
+            is_valid: true,
+            source: LICENSE_SOURCE_MANAGED_PRO.to_string(),
+        };
+
+        let license_path = get_license_path();
+        if let Err(e) = std::fs::write(&license_path, serde_json::to_string_pretty(&stored).unwrap()) {
+            return LicenseInfo {
+                is_valid: false,
+                is_trial: true,
+                email: Some(email_normalized),
+                purchase_date: None,
+                license_key: None,
+                features: get_trial_features(),
+                limitations: get_trial_limitations(),
+                error: Some(format!("Failed to save managed Pro license: {}", e)),
+            };
+        }
+
+        return LicenseInfo {
+            is_valid: true,
+            is_trial: false,
+            email: Some(email_normalized),
+            purchase_date: Some(stored.activated_at),
+            license_key: Some("MANAGED-****-PRO".into()),
+            features: get_full_features(),
+            limitations: get_no_limitations(),
+            error: None,
+        };
+    }
+
+    match verify_with_remote_license_server(&license_key, &email_normalized) {
+        Ok(Some(remote)) if remote.valid => {
+            let now = chrono::Utc::now();
+            let stored = StoredLicense {
+                license_key: license_key.clone(),
+                email: remote.email.clone().unwrap_or_else(|| email_normalized.clone()),
+                activated_at: remote.purchase_date.clone().unwrap_or_else(|| now.to_rfc3339()),
+                last_verified: now.timestamp(),
+                is_valid: true,
+                source: LICENSE_SOURCE_REMOTE.to_string(),
+            };
+
+            let license_path = get_license_path();
+            if let Err(e) = std::fs::write(&license_path, serde_json::to_string_pretty(&stored).unwrap()) {
+                return LicenseInfo {
+                    is_valid: false,
+                    is_trial: true,
+                    email: Some(email_normalized),
+                    purchase_date: None,
+                    license_key: None,
+                    features: get_trial_features(),
+                    limitations: get_trial_limitations(),
+                    error: Some(format!("Failed to save remote license: {}", e)),
+                };
+            }
+
+            return LicenseInfo {
+                is_valid: true,
+                is_trial: false,
+                email: Some(stored.email),
+                purchase_date: Some(stored.activated_at),
+                license_key: Some("REMOTE-****-ACCESS".into()),
+                features: remote.features.unwrap_or_else(get_full_features),
+                limitations: get_no_limitations(),
+                error: None,
+            };
+        }
+        Ok(Some(remote)) if remote.recognized => {
+            return LicenseInfo {
+                is_valid: false,
+                is_trial: true,
+                email: Some(email_normalized),
+                purchase_date: None,
+                license_key: None,
+                features: get_trial_features(),
+                limitations: get_trial_limitations(),
+                error: Some(remote.error.unwrap_or_else(|| "Remote access credential rejected".into())),
+            };
+        }
+        _ => {}
+    }
+
+    if has_managed_pro_email(&email_normalized) {
+        return LicenseInfo {
+            is_valid: false,
+            is_trial: true,
+            email: Some(email_normalized),
+            purchase_date: None,
+            license_key: None,
+            features: get_trial_features(),
+            limitations: get_trial_limitations(),
+            error: Some("Managed Pro credentials are invalid for this account".into()),
         };
     }
     
@@ -1122,6 +1635,7 @@ fn activate_license(license_key: String, email: String) -> LicenseInfo {
                 activated_at: created_at.unwrap_or_else(|| now.to_rfc3339()),
                 last_verified: now.timestamp(),
                 is_valid: true,
+                source: LICENSE_SOURCE_GUMROAD.to_string(),
             };
             
             let license_path = get_license_path();
@@ -1175,6 +1689,216 @@ fn deactivate_license() -> LicenseInfo {
         license_key: None,
         features: get_trial_features(),
         limitations: get_trial_limitations(),
+        error: None,
+    }
+}
+
+#[tauri::command]
+fn register_free_user(username: String, email: String, password: String) -> AuthResult {
+    let username_norm = normalize_username(&username);
+    let email_norm = normalize_email(&email);
+
+    if username_norm.len() < 3 {
+        return AuthResult {
+            success: false,
+            profile: None,
+            onboarding_email_sent: false,
+            message: "Signup failed".into(),
+            error: Some("Username must be at least 3 characters".into()),
+        };
+    }
+    if !email_norm.contains('@') || !email_norm.contains('.') {
+        return AuthResult {
+            success: false,
+            profile: None,
+            onboarding_email_sent: false,
+            message: "Signup failed".into(),
+            error: Some("A valid email address is required".into()),
+        };
+    }
+    if password.len() < 8 {
+        return AuthResult {
+            success: false,
+            profile: None,
+            onboarding_email_sent: false,
+            message: "Signup failed".into(),
+            error: Some("Password must be at least 8 characters".into()),
+        };
+    }
+
+    let mut db = load_or_initialize_free_users_db();
+    if db.users.iter().any(|u| u.email.eq_ignore_ascii_case(&email_norm)) {
+        return AuthResult {
+            success: false,
+            profile: None,
+            onboarding_email_sent: false,
+            message: "Signup failed".into(),
+            error: Some("That email is already registered".into()),
+        };
+    }
+    if db.users.iter().any(|u| u.username.eq_ignore_ascii_case(&username_norm)) {
+        return AuthResult {
+            success: false,
+            profile: None,
+            onboarding_email_sent: false,
+            message: "Signup failed".into(),
+            error: Some("That username is already taken".into()),
+        };
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let record = FreeUserRecord {
+        username: username_norm.clone(),
+        email: email_norm.clone(),
+        password_sha256: hash_free_user_password(&email_norm, &password),
+        created_at: now.clone(),
+        last_login_at: now.clone(),
+    };
+    db.users.push(record);
+
+    if let Err(e) = save_free_users_db(&db) {
+        return AuthResult {
+            success: false,
+            profile: None,
+            onboarding_email_sent: false,
+            message: "Signup failed".into(),
+            error: Some(e),
+        };
+    }
+
+    let session = FreeUserSession {
+        username: username_norm.clone(),
+        email: email_norm.clone(),
+        signed_in_at: now.clone(),
+    };
+    if let Err(e) = save_free_session(&session) {
+        return AuthResult {
+            success: false,
+            profile: None,
+            onboarding_email_sent: false,
+            message: "Signup failed".into(),
+            error: Some(e),
+        };
+    }
+
+    let onboarding_sent = send_onboarding_email(&email_norm, &username_norm).unwrap_or(false);
+
+    AuthResult {
+        success: true,
+        profile: Some(AuthProfile {
+            username: username_norm,
+            email: email_norm,
+            created_at: Some(now),
+        }),
+        onboarding_email_sent: onboarding_sent,
+        message: if onboarding_sent {
+            "Free account created. Onboarding email sent.".into()
+        } else {
+            "Free account created.".into()
+        },
+        error: None,
+    }
+}
+
+#[tauri::command]
+fn login_free_user(identifier: String, password: String) -> AuthResult {
+    let identifier_norm = identifier.trim().to_lowercase();
+    let mut db = load_or_initialize_free_users_db();
+
+    let user_index = db.users.iter().position(|u| {
+        u.email.eq_ignore_ascii_case(&identifier_norm)
+            || u.username.eq_ignore_ascii_case(&identifier_norm)
+    });
+
+    let Some(index) = user_index else {
+        return AuthResult {
+            success: false,
+            profile: None,
+            onboarding_email_sent: false,
+            message: "Login failed".into(),
+            error: Some("No user found with that email or username".into()),
+        };
+    };
+
+    let user = db.users.get(index).cloned().unwrap();
+    let hashed = hash_free_user_password(&user.email, &password);
+    if hashed != user.password_sha256 {
+        return AuthResult {
+            success: false,
+            profile: None,
+            onboarding_email_sent: false,
+            message: "Login failed".into(),
+            error: Some("Invalid password".into()),
+        };
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+    if let Some(existing) = db.users.get_mut(index) {
+        existing.last_login_at = now.clone();
+    }
+    let _ = save_free_users_db(&db);
+
+    let session = FreeUserSession {
+        username: user.username.clone(),
+        email: user.email.clone(),
+        signed_in_at: now.clone(),
+    };
+    if let Err(e) = save_free_session(&session) {
+        return AuthResult {
+            success: false,
+            profile: None,
+            onboarding_email_sent: false,
+            message: "Login failed".into(),
+            error: Some(e),
+        };
+    }
+
+    AuthResult {
+        success: true,
+        profile: Some(AuthProfile {
+            username: user.username,
+            email: user.email,
+            created_at: Some(user.created_at),
+        }),
+        onboarding_email_sent: false,
+        message: "Login successful".into(),
+        error: None,
+    }
+}
+
+#[tauri::command]
+fn get_free_user_session() -> AuthResult {
+    if let Some(session) = load_free_session() {
+        AuthResult {
+            success: true,
+            profile: Some(AuthProfile {
+                username: session.username,
+                email: session.email,
+                created_at: None,
+            }),
+            onboarding_email_sent: false,
+            message: "Session active".into(),
+            error: None,
+        }
+    } else {
+        AuthResult {
+            success: false,
+            profile: None,
+            onboarding_email_sent: false,
+            message: "No active session".into(),
+            error: None,
+        }
+    }
+}
+
+#[tauri::command]
+fn logout_free_user() -> AuthResult {
+    clear_free_session();
+    AuthResult {
+        success: true,
+        profile: None,
+        onboarding_email_sent: false,
+        message: "Logged out".into(),
         error: None,
     }
 }
@@ -1382,13 +2106,7 @@ fn find_windows_python_executable(env_dir: &Path) -> Option<PathBuf> {
 
 #[cfg(target_os = "windows")]
 fn is_python_runtime_ready(python_exe: &Path) -> bool {
-    let checks = ["import torch", "import demucs", "import librosa"];
-    checks.iter().all(|snippet| {
-        let mut cmd = Command::new(python_exe);
-        cmd.args(&["-c", snippet]);
-        cmd.creation_flags(CREATE_NO_WINDOW);
-        cmd.output().map(|out| out.status.success()).unwrap_or(false)
-    })
+    detect_missing_python_modules(python_exe, &REQUIRED_PYTHON_PACKAGES).is_empty()
 }
 
 // ============================================================================
@@ -1493,6 +2211,15 @@ async fn execute_splice(
             request.passes = Some(1);
         } else if request.passes.is_none() {
             request.passes = Some(1);
+        }
+
+        // Disable all FX paths for trial/basic users
+        if request.pre_split_fx.is_some() {
+            println!("[License] Trial: Removing pre-split FX config");
+            request.pre_split_fx = None;
+        }
+        if request.apply_effects != Some(false) {
+            request.apply_effects = Some(false);
         }
 
         // Enforce cooldown between trial splits.
@@ -1808,6 +2535,11 @@ async fn apply_stem_fx(
     stem_path: String,
     fx_json: String,
 ) -> Result<String, String> {
+    let license = get_license_status();
+    if license.is_trial {
+        return Err("FX processing is available for Pro users only.".to_string());
+    }
+
     if !Path::new(&stem_path).exists() {
         return Err(format!("Stem file not found: {}", stem_path));
     }
@@ -1860,6 +2592,11 @@ async fn preview_vst_plugin(
     vst_path: String,
     audio_path: String,
 ) -> Result<String, String> {
+    let license = get_license_status();
+    if license.is_trial {
+        return Err("VST preview is available for Pro users only.".to_string());
+    }
+
     // Resolve preview_vst.py script path
     let script_path = resolve_python_script_path("preview_vst.py");
 
@@ -1971,6 +2708,41 @@ pub struct PythonStatus {
     pub missing_packages: Vec<String>,
 }
 
+const REQUIRED_PYTHON_PACKAGES: [&str; 5] = ["torch", "demucs", "librosa", "soundfile", "numpy"];
+const OPTIONAL_PYTHON_PACKAGES: [&str; 6] = ["pedalboard", "pydub", "psutil", "pynvml", "sounddevice", "pyloudnorm"];
+const STABLE_TORCH_VERSION: &str = "2.5.1";
+const STABLE_DEMUCS_VERSION: &str = "4.0.1";
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+struct PythonSetupAttempt {
+    label: String,
+    command: String,
+    success: bool,
+    details: String,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+struct PythonSetupDiagnostics {
+    started_at: String,
+    env_dir: String,
+    selected_strategy: Option<String>,
+    attempts: Vec<PythonSetupAttempt>,
+    warnings: Vec<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+struct PythonRuntimeMarker {
+    fingerprint: String,
+    required_modules: Vec<String>,
+    created_at: String,
+}
+
+#[derive(Clone, Debug)]
+struct PipInstallPlan {
+    label: String,
+    args: Vec<String>,
+}
+
 fn get_python_env_dir() -> std::path::PathBuf {
     let mut possible_paths: Vec<std::path::PathBuf> = Vec::new();
     
@@ -2050,8 +2822,249 @@ fn get_python_executable() -> Option<std::path::PathBuf> {
     }
 }
 
+fn get_python_setup_diagnostics_path() -> std::path::PathBuf {
+    let data_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("StemSplit");
+
+    std::fs::create_dir_all(&data_dir).ok();
+    data_dir.join("python-setup-diagnostics.json")
+}
+
+fn get_python_runtime_marker_path(env_dir: &Path) -> PathBuf {
+    env_dir.join("python_runtime_ready.json")
+}
+
+fn get_runtime_fingerprint_anchor_paths(env_dir: &Path) -> Vec<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        vec![
+            env_dir.join("python.exe"),
+            env_dir.join("python310._pth"),
+            env_dir.join("Lib").join("site-packages").join("torch").join("__init__.py"),
+            env_dir.join("Lib").join("site-packages").join("demucs").join("__init__.py"),
+            env_dir.join("Lib").join("site-packages").join("librosa").join("__init__.py"),
+            env_dir.join("Lib").join("site-packages").join("soundfile.py"),
+            env_dir.join("Lib").join("site-packages").join("numpy").join("__init__.py"),
+        ]
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        vec![
+            env_dir.join("bin").join("python3"),
+            env_dir.join("lib").join("python3.10").join("site-packages").join("torch").join("__init__.py"),
+            env_dir.join("lib").join("python3.10").join("site-packages").join("demucs").join("__init__.py"),
+            env_dir.join("lib").join("python3.10").join("site-packages").join("librosa").join("__init__.py"),
+            env_dir.join("lib").join("python3.10").join("site-packages").join("soundfile.py"),
+            env_dir.join("lib").join("python3.10").join("site-packages").join("numpy").join("__init__.py"),
+        ]
+    }
+}
+
+fn build_python_runtime_fingerprint(env_dir: &Path) -> Result<String, String> {
+    let anchors = get_runtime_fingerprint_anchor_paths(env_dir);
+    let mut hasher = Sha256::new();
+
+    for anchor in anchors {
+        let bytes = std::fs::read(&anchor)
+            .map_err(|e| format!("Runtime fingerprint anchor missing '{}': {}", anchor.display(), e))?;
+        hasher.update(anchor.to_string_lossy().as_bytes());
+        hasher.update([0]);
+        hasher.update(&bytes);
+        hasher.update([0]);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn read_python_runtime_marker(env_dir: &Path) -> Option<PythonRuntimeMarker> {
+    let marker_path = get_python_runtime_marker_path(env_dir);
+    std::fs::read_to_string(marker_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<PythonRuntimeMarker>(&content).ok())
+}
+
+fn write_python_runtime_marker(env_dir: &Path, fingerprint: &str) -> Result<(), String> {
+    let marker = PythonRuntimeMarker {
+        fingerprint: fingerprint.to_string(),
+        required_modules: REQUIRED_PYTHON_PACKAGES.iter().map(|pkg| pkg.to_string()).collect(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    let marker_path = get_python_runtime_marker_path(env_dir);
+    let content = serde_json::to_string_pretty(&marker)
+        .map_err(|e| format!("Failed to serialize runtime marker: {}", e))?;
+    std::fs::write(&marker_path, content)
+        .map_err(|e| format!("Failed to write runtime marker '{}': {}", marker_path.display(), e))
+}
+
+fn save_python_setup_diagnostics(diagnostics: &PythonSetupDiagnostics) {
+    let path = get_python_setup_diagnostics_path();
+    if let Ok(content) = serde_json::to_string_pretty(diagnostics) {
+        let _ = std::fs::write(path, content);
+    }
+}
+
+fn truncate_diagnostic_details(details: &str) -> String {
+    const MAX_LEN: usize = 4000;
+
+    let trimmed = details.trim();
+    if trimmed.len() <= MAX_LEN {
+        return trimmed.to_string();
+    }
+
+    format!("{}...", &trimmed[..MAX_LEN])
+}
+
+fn detect_missing_python_modules(python_exe: &Path, modules: &[&str]) -> Vec<String> {
+    modules
+        .iter()
+        .filter_map(|module| {
+            let mut check_cmd = Command::new(python_exe);
+            check_cmd.args(&["-c", &format!("import {}", module)]);
+            #[cfg(target_os = "windows")]
+            check_cmd.creation_flags(CREATE_NO_WINDOW);
+
+            if check_cmd
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+            {
+                None
+            } else {
+                Some((*module).to_string())
+            }
+        })
+        .collect()
+}
+
+fn run_python_command_capture(
+    python_exe: &Path,
+    args: &[String],
+    current_dir: Option<&Path>,
+) -> Result<std::process::Output, String> {
+    let mut cmd = Command::new(python_exe);
+    cmd.args(args);
+    if let Some(dir) = current_dir {
+        cmd.current_dir(dir);
+    }
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    cmd.output().map_err(|error| {
+        format!(
+            "Failed to run '{} {}': {}",
+            python_exe.display(),
+            args.join(" "),
+            error
+        )
+    })
+}
+
+fn run_python_step(
+    python_exe: &Path,
+    env_dir: &Path,
+    label: &str,
+    args: Vec<String>,
+    diagnostics: &mut PythonSetupDiagnostics,
+) -> Result<(), String> {
+    let output = run_python_command_capture(python_exe, &args, Some(env_dir))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let mut details = String::new();
+
+    if !stdout.is_empty() {
+        details.push_str(&stdout);
+    }
+    if !stderr.is_empty() {
+        if !details.is_empty() {
+            details.push_str("\n\n");
+        }
+        details.push_str(&stderr);
+    }
+    if details.is_empty() {
+        details.push_str("No output captured.");
+    }
+
+    diagnostics.attempts.push(PythonSetupAttempt {
+        label: label.to_string(),
+        command: format!("{} {}", python_exe.display(), args.join(" ")),
+        success: output.status.success(),
+        details: truncate_diagnostic_details(&details),
+    });
+    save_python_setup_diagnostics(diagnostics);
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!("{} failed: {}", label, truncate_diagnostic_details(&details)))
+    }
+}
+
+fn run_best_effort_python_step(
+    python_exe: &Path,
+    env_dir: &Path,
+    label: &str,
+    args: Vec<String>,
+    diagnostics: &mut PythonSetupDiagnostics,
+) {
+    if let Err(error) = run_python_step(python_exe, env_dir, label, args, diagnostics) {
+        diagnostics.warnings.push(error);
+        save_python_setup_diagnostics(diagnostics);
+    }
+}
+
+fn install_first_working_plan(
+    python_exe: &Path,
+    env_dir: &Path,
+    plans: Vec<PipInstallPlan>,
+    diagnostics: &mut PythonSetupDiagnostics,
+) -> Result<String, String> {
+    let mut failures = Vec::new();
+
+    for plan in plans {
+        match run_python_step(python_exe, env_dir, &plan.label, plan.args, diagnostics) {
+            Ok(()) => {
+                diagnostics.selected_strategy = Some(plan.label.clone());
+                save_python_setup_diagnostics(diagnostics);
+                return Ok(plan.label);
+            }
+            Err(error) => failures.push(error),
+        }
+    }
+
+    Err(failures.join(" | "))
+}
+
+fn clear_python_env_state(env_dir: &Path) -> Result<(), String> {
+    if !env_dir.exists() {
+        return Ok(());
+    }
+
+    let mut last_error: Option<String> = None;
+    for _ in 0..3 {
+        match std::fs::remove_dir_all(env_dir) {
+            Ok(_) => {
+                return Ok(());
+            }
+            Err(error) => {
+                last_error = Some(error.to_string());
+                std::thread::sleep(std::time::Duration::from_millis(700));
+            }
+        }
+    }
+
+    Err(format!(
+        "Failed to clear existing runtime state at '{}': {}",
+        env_dir.display(),
+        last_error.unwrap_or_else(|| "unknown error".to_string())
+    ))
+}
+
 #[tauri::command]
 async fn check_python_status() -> Result<PythonStatus, String> {
+    let env_dir = get_python_env_dir();
     let python_exe = get_python_executable();
     
     if let Some(ref exe) = python_exe {
@@ -2074,20 +3087,30 @@ async fn check_python_status() -> Result<PythonStatus, String> {
             }
         });
         
-        // Check required packages
-        let required = vec!["torch", "demucs", "librosa", "soundfile", "pedalboard"];
-        let mut missing = Vec::new();
-        
-        for pkg in &required {
-            let mut check_cmd = Command::new(exe);
-            check_cmd.args(&["-c", &format!("import {}", pkg)]);
-            #[cfg(target_os = "windows")]
-            check_cmd.creation_flags(CREATE_NO_WINDOW);
-            
-            if !check_cmd.output().map(|o| o.status.success()).unwrap_or(false) {
-                missing.push(pkg.to_string());
+        // Fast path: trust marker when runtime fingerprint matches expected anchors.
+        let marker_valid = if let Some(marker) = read_python_runtime_marker(&env_dir) {
+            let expected_modules: Vec<String> = REQUIRED_PYTHON_PACKAGES
+                .iter()
+                .map(|pkg| pkg.to_string())
+                .collect();
+
+            if marker.required_modules != expected_modules {
+                false
+            } else {
+                build_python_runtime_fingerprint(&env_dir)
+                    .map(|fingerprint| fingerprint == marker.fingerprint)
+                    .unwrap_or(false)
             }
-        }
+        } else {
+            false
+        };
+
+        // If marker is stale/missing, fall back to import checks.
+        let missing = if marker_valid {
+            Vec::new()
+        } else {
+            detect_missing_python_modules(exe, &REQUIRED_PYTHON_PACKAGES)
+        };
         
         Ok(PythonStatus {
             installed: true,
@@ -2102,7 +3125,7 @@ async fn check_python_status() -> Result<PythonStatus, String> {
             path: None,
             version: None,
             packages_installed: false,
-            missing_packages: vec!["torch".into(), "demucs".into(), "librosa".into()],
+            missing_packages: REQUIRED_PYTHON_PACKAGES.iter().map(|pkg| pkg.to_string()).collect(),
         })
     }
 }
@@ -2110,6 +3133,7 @@ async fn check_python_status() -> Result<PythonStatus, String> {
 #[tauri::command]
 async fn setup_python_environment(window: tauri::Window) -> Result<String, String> {
     let env_dir = get_python_env_dir();
+    let diagnostics_path = get_python_setup_diagnostics_path();
     let system_profile = hardware::get_system_profile().await.unwrap_or_else(|_| hardware::SystemProfile {
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
@@ -2125,6 +3149,14 @@ async fn setup_python_environment(window: tauri::Window) -> Result<String, Strin
             "python_env_linux.zip".to_string()
         },
     });
+    let mut diagnostics = PythonSetupDiagnostics {
+        started_at: chrono::Utc::now().to_rfc3339(),
+        env_dir: env_dir.to_string_lossy().to_string(),
+        selected_strategy: None,
+        attempts: Vec::new(),
+        warnings: Vec::new(),
+    };
+    save_python_setup_diagnostics(&diagnostics);
     
     // Create directory if needed
     std::fs::create_dir_all(&env_dir).map_err(|e| format!("Failed to create directory: {}", e))?;
@@ -2150,6 +3182,24 @@ async fn setup_python_environment(window: tauri::Window) -> Result<String, Strin
     
     #[cfg(target_os = "windows")]
     {
+        if let Some(existing_python) = find_windows_python_executable(&env_dir) {
+            let missing = detect_missing_python_modules(&existing_python, &REQUIRED_PYTHON_PACKAGES);
+            if missing.is_empty() {
+                if let Ok(fingerprint) = build_python_runtime_fingerprint(&env_dir) {
+                    let _ = write_python_runtime_marker(&env_dir, &fingerprint);
+                }
+                emit_progress("Existing Python runtime is already ready.", 100);
+                return Ok("Python environment ready".into());
+            }
+
+            diagnostics.warnings.push(format!(
+                "Repairing existing runtime because these core packages are missing: {}",
+                missing.join(", ")
+            ));
+            save_python_setup_diagnostics(&diagnostics);
+            emit_progress("Repairing existing Python runtime...", 8);
+        }
+
         let payload_url = format!("{}/{}", get_asset_base_url(), system_profile.recommended_payload);
         let payload_zip_path = env_dir.join("runtime_payload.zip");
         let runtime_checksum = std::env::var("STEMSPLIT_RUNTIME_PAYLOAD_SHA256").ok();
@@ -2175,79 +3225,206 @@ async fn setup_python_environment(window: tauri::Window) -> Result<String, Strin
                     Ok(_) => {
                         if let Some(python_exe) = find_windows_python_executable(&env_dir) {
                             if is_python_runtime_ready(&python_exe) {
+                                if let Ok(fingerprint) = build_python_runtime_fingerprint(&env_dir) {
+                                    let _ = write_python_runtime_marker(&env_dir, &fingerprint);
+                                }
                                 emit_progress("Optimized runtime package ready", 100);
                                 std::fs::remove_file(&payload_zip_path).ok();
                                 return Ok("Python environment ready (prebuilt runtime)".into());
                             }
                         }
+                        diagnostics.warnings.push("Optimized runtime package extracted but core imports failed, continuing with repair install.".into());
+                        save_python_setup_diagnostics(&diagnostics);
                         false
                     }
-                    Err(_) => false,
+                    Err(error) => {
+                        diagnostics.warnings.push(format!("Optimized runtime extract failed: {}", error));
+                        save_python_setup_diagnostics(&diagnostics);
+                        false
+                    }
                 }
             }
-            Err(_) => false,
+            Err(error) => {
+                diagnostics.warnings.push(format!("Optimized runtime download failed: {}", error));
+                save_python_setup_diagnostics(&diagnostics);
+                false
+            }
         };
 
         if !prebuilt_ready {
             emit_progress("Optimized package unavailable, switching to standard setup...", 18);
         }
 
-        // Download Python embeddable
-        emit_progress("Downloading Python 3.10...", 5);
-        let python_url = "https://www.python.org/ftp/python/3.10.11/python-3.10.11-embed-amd64.zip";
-        let zip_path = env_dir.join("python.zip");
-        
-        downloader::stream_download_to_path(&window, python_url, &zip_path, "python-setup-progress", None).await?;
-        
-        emit_progress("Extracting Python...", 30);
-        extract_zip(&zip_path, &env_dir)?;
-        std::fs::remove_file(&zip_path).ok();
-        
-        // Enable site-packages
+        let python_exe = env_dir.join("python.exe");
+        if !python_exe.exists() {
+            emit_progress("Downloading Python 3.10...", 20);
+            let python_url = "https://www.python.org/ftp/python/3.10.11/python-3.10.11-embed-amd64.zip";
+            let zip_path = env_dir.join("python.zip");
+
+            downloader::stream_download_to_path(&window, python_url, &zip_path, "python-setup-progress", None).await?;
+
+            emit_progress("Extracting Python...", 28);
+            extract_zip(&zip_path, &env_dir)?;
+            std::fs::remove_file(&zip_path).ok();
+        }
+
         let pth_file = env_dir.join("python310._pth");
         if pth_file.exists() {
             let content = std::fs::read_to_string(&pth_file).unwrap_or_default();
             let new_content = content.replace("#import site", "import site");
             std::fs::write(&pth_file, new_content).ok();
         }
-        
-        // Install pip
-        emit_progress("Installing pip...", 35);
-        let getpip_url = "https://bootstrap.pypa.io/get-pip.py";
-        let getpip_path = env_dir.join("get-pip.py");
-        downloader::stream_download_to_path(&window, getpip_url, &getpip_path, "python-setup-progress", None).await?;
-        
-        let python_exe = env_dir.join("python.exe");
-        let mut cmd = Command::new(&python_exe);
-        cmd.arg(&getpip_path).arg("--no-warn-script-location");
-        cmd.current_dir(&env_dir);
-        cmd.creation_flags(CREATE_NO_WINDOW);
-        let getpip_output = cmd
-            .output()
-            .map_err(|e| format!("Failed to install pip: {}", e))?;
-        if !getpip_output.status.success() {
-            let stderr = String::from_utf8_lossy(&getpip_output.stderr).trim().to_string();
-            let stdout = String::from_utf8_lossy(&getpip_output.stdout).trim().to_string();
-            let details = if !stderr.is_empty() { stderr } else { stdout };
-            return Err(format!("pip bootstrap failed: {}", details));
+
+        let pip_exe = env_dir.join("Scripts").join("pip.exe");
+        if !pip_exe.exists() {
+            emit_progress("Installing pip...", 34);
+            let getpip_url = "https://bootstrap.pypa.io/get-pip.py";
+            let getpip_path = env_dir.join("get-pip.py");
+            downloader::stream_download_to_path(&window, getpip_url, &getpip_path, "python-setup-progress", None).await?;
+
+            run_python_step(
+                &python_exe,
+                &env_dir,
+                "Bootstrap pip",
+                vec![
+                    getpip_path.to_string_lossy().to_string(),
+                    "--no-warn-script-location".into(),
+                ],
+                &mut diagnostics,
+            )?;
+            std::fs::remove_file(&getpip_path).ok();
         }
-        std::fs::remove_file(&getpip_path).ok();
-        
-        // Install packages
-        let torch_packages = if system_profile.has_nvidia {
-            emit_progress("Installing PyTorch with CUDA support...", 40);
-            "torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118"
-        } else {
-            emit_progress("Installing PyTorch CPU runtime...", 40);
-            "torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu"
-        };
-        install_package(&python_exe, torch_packages)?;
-        
-        emit_progress("Installing Demucs...", 70);
-        install_package(&python_exe, "demucs")?;
-        
-        emit_progress("Installing audio libraries...", 85);
-        install_package(&python_exe, "librosa soundfile pedalboard pydub numpy resampy tqdm psutil pynvml sounddevice pyloudnorm")?;
+
+        emit_progress("Preparing installer toolchain...", 38);
+        run_best_effort_python_step(
+            &python_exe,
+            &env_dir,
+            "Upgrade pip tooling",
+            vec![
+                "-m".into(),
+                "pip".into(),
+                "install".into(),
+                "--upgrade".into(),
+                "pip".into(),
+                "setuptools".into(),
+                "wheel".into(),
+                "--no-warn-script-location".into(),
+                "--no-cache-dir".into(),
+            ],
+            &mut diagnostics,
+        );
+
+        emit_progress("Installing PyTorch runtime...", 45);
+        let mut torch_plans = Vec::new();
+        if system_profile.has_nvidia {
+            torch_plans.push(PipInstallPlan {
+                label: "PyTorch 2.5.1 CUDA 12.1".into(),
+                args: vec![
+                    "-m".into(), "pip".into(), "install".into(),
+                    format!("torch=={}+cu121", STABLE_TORCH_VERSION),
+                    "--index-url".into(), "https://download.pytorch.org/whl/cu121".into(),
+                    "--no-warn-script-location".into(), "--no-cache-dir".into(),
+                ],
+            });
+        }
+        torch_plans.push(PipInstallPlan {
+            label: "PyTorch 2.5.1 CPU".into(),
+            args: vec![
+                "-m".into(), "pip".into(), "install".into(),
+                format!("torch=={}+cpu", STABLE_TORCH_VERSION),
+                "--index-url".into(), "https://download.pytorch.org/whl/cpu".into(),
+                "--no-warn-script-location".into(), "--no-cache-dir".into(),
+            ],
+        });
+        torch_plans.push(PipInstallPlan {
+            label: "PyTorch 2.5.1 default wheel".into(),
+            args: vec![
+                "-m".into(), "pip".into(), "install".into(),
+                format!("torch=={}", STABLE_TORCH_VERSION),
+                "--no-warn-script-location".into(), "--no-cache-dir".into(),
+            ],
+        });
+        install_first_working_plan(&python_exe, &env_dir, torch_plans, &mut diagnostics)?;
+
+        emit_progress("Installing Demucs core...", 68);
+        run_python_step(
+            &python_exe,
+            &env_dir,
+            "Install Demucs",
+            vec![
+                "-m".into(),
+                "pip".into(),
+                "install".into(),
+                format!("demucs=={}", STABLE_DEMUCS_VERSION),
+                "--no-warn-script-location".into(),
+                "--no-cache-dir".into(),
+            ],
+            &mut diagnostics,
+        )?;
+
+        emit_progress("Installing core audio libraries...", 82);
+        run_python_step(
+            &python_exe,
+            &env_dir,
+            "Install core audio libraries",
+            vec![
+                "-m".into(),
+                "pip".into(),
+                "install".into(),
+                "librosa".into(),
+                "soundfile".into(),
+                "numpy".into(),
+                "resampy".into(),
+                "tqdm".into(),
+                "--no-warn-script-location".into(),
+                "--no-cache-dir".into(),
+            ],
+            &mut diagnostics,
+        )?;
+
+        emit_progress("Installing optional enhancement packages...", 92);
+        run_best_effort_python_step(
+            &python_exe,
+            &env_dir,
+            "Install optional enhancement packages",
+            vec![
+                "-m".into(),
+                "pip".into(),
+                "install".into(),
+                "pedalboard>=0.8.0".into(),
+                "pydub>=0.25.1".into(),
+                "psutil".into(),
+                "pynvml".into(),
+                "sounddevice".into(),
+                "pyloudnorm".into(),
+                "audio-separator[cpu]".into(),
+                "--no-warn-script-location".into(),
+                "--no-cache-dir".into(),
+            ],
+            &mut diagnostics,
+        );
+
+        let missing = detect_missing_python_modules(&python_exe, &REQUIRED_PYTHON_PACKAGES);
+        if !missing.is_empty() {
+            return Err(format!(
+                "Python runtime repair completed but core packages are still missing: {}. Diagnostics: {}",
+                missing.join(", "),
+                diagnostics_path.display()
+            ));
+        }
+
+        let optional_missing = detect_missing_python_modules(&python_exe, &OPTIONAL_PYTHON_PACKAGES);
+        if !optional_missing.is_empty() {
+            diagnostics.warnings.push(format!(
+                "Optional packages unavailable: {}",
+                optional_missing.join(", ")
+            ));
+            save_python_setup_diagnostics(&diagnostics);
+        }
+
+        if let Ok(fingerprint) = build_python_runtime_fingerprint(&env_dir) {
+            let _ = write_python_runtime_marker(&env_dir, &fingerprint);
+        }
     }
     
     #[cfg(target_os = "macos")]
@@ -2310,7 +3487,99 @@ async fn setup_python_environment(window: tauri::Window) -> Result<String, Strin
     }
     
     emit_progress("Setup complete!", 100);
-    Ok("Python environment ready".into())
+    if diagnostics.warnings.is_empty() {
+        Ok("Python environment ready".into())
+    } else {
+        Ok(format!(
+            "Python environment ready with optional features deferred. Diagnostics: {}",
+            diagnostics_path.display()
+        ))
+    }
+}
+
+#[tauri::command]
+async fn deep_repair_python_environment(window: tauri::Window) -> Result<String, String> {
+    let env_dir = get_python_env_dir();
+    let emit_progress = |msg: &str, pct: u32| {
+        let _ = window.emit("python-setup-progress", serde_json::json!({
+            "message": msg,
+            "percent": pct
+        }));
+    };
+
+    emit_progress("Deep Repair: preparing aggressive runtime reset...", 2);
+
+    let staged_attempts = vec![
+        (
+            "primary",
+            None::<&str>,
+            None::<&str>,
+            "Deep Repair: reinstalling from primary sources...",
+        ),
+        (
+            "mirror-pypi-cpu",
+            Some("https://pypi.org/simple"),
+            Some("https://download.pytorch.org/whl/cpu"),
+            "Deep Repair: retrying with staged mirror sources...",
+        ),
+    ];
+
+    let original_pip_index_url = std::env::var("PIP_INDEX_URL").ok();
+    let original_pip_extra_index_url = std::env::var("PIP_EXTRA_INDEX_URL").ok();
+
+    let mut failures: Vec<String> = Vec::new();
+
+    for (index, (label, pip_index, pip_extra, msg)) in staged_attempts.iter().enumerate() {
+        emit_progress(msg, if index == 0 { 8 } else { 18 });
+
+        clear_python_env_state(&env_dir)?;
+        std::fs::create_dir_all(&env_dir)
+            .map_err(|e| format!("Failed to recreate runtime folder: {}", e))?;
+
+        if let Some(value) = pip_index {
+            std::env::set_var("PIP_INDEX_URL", value);
+        } else {
+            std::env::remove_var("PIP_INDEX_URL");
+        }
+
+        if let Some(value) = pip_extra {
+            std::env::set_var("PIP_EXTRA_INDEX_URL", value);
+        } else {
+            std::env::remove_var("PIP_EXTRA_INDEX_URL");
+        }
+
+        match setup_python_environment(window.clone()).await {
+            Ok(message) => {
+                match &original_pip_index_url {
+                    Some(value) => std::env::set_var("PIP_INDEX_URL", value),
+                    None => std::env::remove_var("PIP_INDEX_URL"),
+                }
+                match &original_pip_extra_index_url {
+                    Some(value) => std::env::set_var("PIP_EXTRA_INDEX_URL", value),
+                    None => std::env::remove_var("PIP_EXTRA_INDEX_URL"),
+                }
+                emit_progress("Deep Repair complete.", 100);
+                return Ok(format!("Deep Repair completed via {} path. {}", label, message));
+            }
+            Err(error) => {
+                failures.push(format!("{} attempt failed: {}", label, error));
+            }
+        }
+    }
+
+    match &original_pip_index_url {
+        Some(value) => std::env::set_var("PIP_INDEX_URL", value),
+        None => std::env::remove_var("PIP_INDEX_URL"),
+    }
+    match &original_pip_extra_index_url {
+        Some(value) => std::env::set_var("PIP_EXTRA_INDEX_URL", value),
+        None => std::env::remove_var("PIP_EXTRA_INDEX_URL"),
+    }
+
+    Err(format!(
+        "Deep Repair failed after staged retries. {}",
+        failures.join(" | ")
+    ))
 }
 
 #[tauri::command]
@@ -2348,29 +3617,6 @@ async fn install_support_asset(
         asset_name: request.asset_name,
         installed_to: destination_dir.to_string_lossy().to_string(),
     })
-}
-
-fn install_package(python_exe: &std::path::Path, packages: &str) -> Result<(), String> {
-    let mut cmd = Command::new(python_exe);
-    cmd.args(&["-m", "pip", "install"]);
-    cmd.args(packages.split_whitespace());
-    cmd.arg("--no-warn-script-location");
-    cmd.arg("--no-cache-dir");
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
-
-    let output = cmd
-        .output()
-        .map_err(|e| format!("Failed to install {}: {}", packages, e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let details = if !stderr.is_empty() { stderr } else { stdout };
-        return Err(format!("pip install failed for {}: {}", packages, details));
-    }
-
-    Ok(())
 }
 
 fn extract_zip(zip_path: &std::path::Path, dest_dir: &std::path::Path) -> Result<(), String> {
@@ -2435,11 +3681,16 @@ fn main() {
             stop_vst_plugin,
             check_python_status,
             setup_python_environment,
+            deep_repair_python_environment,
             install_support_asset,
             // License commands
             get_license_status,
             activate_license,
             deactivate_license,
+            register_free_user,
+            login_free_user,
+            get_free_user_session,
+            logout_free_user,
             get_trial_cooldown_status,
             test_security_webhook,
             // Hardware and downloading

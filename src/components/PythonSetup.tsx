@@ -1,20 +1,25 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Download, CheckCircle, XCircle, Loader2, AlertCircle } from 'lucide-react';
-import { checkPythonStatus, setupPythonEnvironment, PythonStatus, PythonSetupProgress } from '@/lib/tauri-bridge';
+import { checkPythonStatus, setupPythonEnvironment, deepRepairPythonEnvironment, PythonStatus, PythonSetupProgress } from '@/lib/tauri-bridge';
 
 interface PythonSetupProps {
   onReady: () => void;
 }
 
 export default function PythonSetup({ onReady }: PythonSetupProps) {
+  const AUTO_INSTALL_ATTEMPTS = 2;
+  const AUTO_RETRY_DELAY_MS = 4000;
+
   const [status, setStatus] = useState<PythonStatus | null>(null);
   const [isChecking, setIsChecking] = useState(true);
   const [isInstalling, setIsInstalling] = useState(false);
   const [progress, setProgress] = useState<PythonSetupProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deepRepairUsed, setDeepRepairUsed] = useState(false);
+  const autoSetupStartedRef = useRef(false);
 
   const checkStatus = useCallback(async () => {
     setIsChecking(true);
@@ -39,24 +44,105 @@ export default function PythonSetup({ onReady }: PythonSetupProps) {
     checkStatus();
   }, [checkStatus]);
 
-  const handleInstall = async () => {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const runInstall = useCallback(async (autoMode: boolean) => {
     setIsInstalling(true);
     setError(null);
-    setProgress({ message: 'Starting...', percent: 0 });
+    setProgress({
+      message: autoMode ? 'Auto-provisioning runtime...' : 'Starting...',
+      percent: 0,
+    });
+
+    const maxAttempts = autoMode ? AUTO_INSTALL_ATTEMPTS : 1;
+    let lastError: string | null = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await setupPythonEnvironment((prog) => {
+          setProgress(prog);
+        });
+
+        // Re-check status after install.
+        await checkStatus();
+        setIsInstalling(false);
+        return;
+      } catch (err: unknown) {
+        lastError = err instanceof Error ? err.message : String(err);
+
+        if (autoMode && attempt < maxAttempts) {
+          setProgress({
+            message: `Auto-retry ${attempt}/${maxAttempts - 1} in progress...`,
+            percent: 5,
+          });
+          await sleep(AUTO_RETRY_DELAY_MS);
+          continue;
+        }
+      }
+    }
+
+    if (autoMode) {
+      try {
+        setDeepRepairUsed(true);
+        setProgress({
+          message: 'Auto-fallback: running Deep Repair...',
+          percent: 3,
+        });
+        await deepRepairPythonEnvironment((prog) => {
+          setProgress(prog);
+        });
+        await checkStatus();
+        setIsInstalling(false);
+        return;
+      } catch (deepRepairError: unknown) {
+        const detail = deepRepairError instanceof Error ? deepRepairError.message : String(deepRepairError);
+        lastError = `${lastError ?? 'Auto setup failed'} | Deep Repair failed: ${detail}`;
+      }
+    }
+
+    setError(`Installation failed: ${lastError ?? 'Unknown error'}`);
+    setIsInstalling(false);
+  }, [checkStatus]);
+
+  const handleInstall = async () => {
+    await runInstall(false);
+  };
+
+  const handleDeepRepair = async () => {
+    setIsInstalling(true);
+    setError(null);
+    setDeepRepairUsed(true);
+    setProgress({ message: 'Starting Deep Repair...', percent: 0 });
 
     try {
-      await setupPythonEnvironment((prog) => {
+      await deepRepairPythonEnvironment((prog) => {
         setProgress(prog);
       });
-      
-      // Re-check status after install
       await checkStatus();
-    } catch (err: any) {
+    } catch (err: unknown) {
       const detail = err instanceof Error ? err.message : String(err);
-      setError(`Installation failed: ${detail}`);
+      setError(`Deep Repair failed: ${detail}`);
+    } finally {
       setIsInstalling(false);
     }
   };
+
+  useEffect(() => {
+    if (isChecking || isInstalling) {
+      return;
+    }
+
+    if (status?.installed && status?.packages_installed) {
+      return;
+    }
+
+    if (autoSetupStartedRef.current) {
+      return;
+    }
+
+    autoSetupStartedRef.current = true;
+    void runInstall(true);
+  }, [isChecking, isInstalling, status, runInstall]);
 
   if (isChecking) {
     return (
@@ -95,7 +181,7 @@ export default function PythonSetup({ onReady }: PythonSetupProps) {
           </div>
           <div>
             <h2 className="text-xl font-semibold text-white">Setup Required</h2>
-            <p className="text-zinc-400 text-sm">AI components need to be downloaded</p>
+            <p className="text-zinc-400 text-sm">AI components are being installed automatically</p>
           </div>
         </div>
 
@@ -149,10 +235,10 @@ export default function PythonSetup({ onReady }: PythonSetupProps) {
         {/* Info */}
         <div className="bg-zinc-800/50 rounded-lg p-4 mb-6">
           <p className="text-zinc-300 text-sm">
-            <strong>Download Size:</strong> ~2.7 GB
+            <strong>Runtime Download:</strong> up to ~2.7 GB
           </p>
           <p className="text-zinc-400 text-sm mt-1">
-            Includes PyTorch with GPU support and Demucs AI models for professional stem separation.
+            StemSplit tries an optimized runtime first, then automatically falls back to a known-safe CPU stack if GPU packages fail.
           </p>
         </div>
 
@@ -171,14 +257,31 @@ export default function PythonSetup({ onReady }: PythonSetupProps) {
             ) : (
               <>
                 <Download className="w-5 h-5" />
-                Download & Install
+                Retry Setup
+              </>
+            )}
+          </button>
+          <button
+            onClick={handleDeepRepair}
+            disabled={isInstalling}
+            className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-medium rounded-xl transition-colors"
+          >
+            {isInstalling && deepRepairUsed ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Deep Repair...
+              </>
+            ) : (
+              <>
+                <AlertCircle className="w-5 h-5" />
+                Deep Repair
               </>
             )}
           </button>
         </div>
 
         <p className="text-zinc-500 text-xs text-center mt-4">
-          This only needs to be done once. Your internet connection is required.
+          Setup starts automatically, retries safer paths, and runs Deep Repair before final failure. Use Deep Repair manually if needed.
         </p>
       </motion.div>
     </div>

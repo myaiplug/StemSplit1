@@ -40,6 +40,10 @@ jobs:
         shell: pwsh
         run: npm ci --legacy-peer-deps
 
+      - name: Repair and verify embedded runtime
+        shell: pwsh
+        run: .\setup_embedded_python.ps1 -RepairIfNeeded
+
       - name: Build frontend
         shell: pwsh
         run: npm run build

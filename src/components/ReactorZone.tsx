@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence, useAnimation } from 'framer-motion';
 import { useStemSplit, StemSplitStatus } from '@/hooks/useStemSplit';
 import { openResultsFolder } from '@/lib/tauri-bridge';
+import { useLicense } from '@/contexts/LicenseContext';
 import { open as dialogOpen } from '@tauri-apps/api/dialog';
 import TitleBar from './TitleBar';
 import StemPlayer from './StemPlayer';
@@ -700,8 +701,21 @@ const ReactorZone: React.FC = () => {
     const [activeFxStem, setActiveFxStem] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const { status, progress: progressEvent, progressPercent, result, error, startSeparation, cancel } = useStemSplit();
+    const { isTrial, isPro } = useLicense();
+    const isFreeMode = isTrial && !isPro;
     const { play, stop } = useSoundSystem();
     const prevStatus = useRef(status);
+
+    const openLicenseModal = useCallback(() => {
+        window.dispatchEvent(new CustomEvent('open-license-modal'));
+    }, []);
+
+    useEffect(() => {
+        if (!isFreeMode) return;
+        if (splitEngine !== 'spleeter') setSplitEngine('spleeter');
+        if (splitStems !== '2') setSplitStems('2');
+        if (splitPasses !== '1') setSplitPasses('1');
+    }, [isFreeMode, splitEngine, splitStems, splitPasses]);
 
     // Track finished stems individually for UI glow
     const [finishedStems, setFinishedStems] = useState<Set<string>>(new Set());
@@ -771,9 +785,11 @@ const ReactorZone: React.FC = () => {
                     play('process_loop');
                     startSeparation(nextFile, {
                         outputDir: customOutputDir || undefined,
-                        engine: splitEngine,
-                        stems: parseInt(splitStems),
-                        passes: parseInt(splitPasses)
+                        engine: isFreeMode ? 'spleeter' : splitEngine,
+                        stems: isFreeMode ? 2 : parseInt(splitStems),
+                        passes: isFreeMode ? 1 : parseInt(splitPasses),
+                        format: isFreeMode ? 'mp3' : undefined,
+                        applyEffects: !isFreeMode,
                     });
                 }, 2000);
                 return () => clearTimeout(timeout);
@@ -786,7 +802,7 @@ const ReactorZone: React.FC = () => {
              // Stop queue on error
              setIsProcessingQueue(false);
         }
-    }, [status, isProcessingQueue, queueIndex, pendingFiles, startSeparation, customOutputDir, splitEngine, splitStems, splitPasses, play]);
+    }, [status, isProcessingQueue, queueIndex, pendingFiles, startSeparation, customOutputDir, splitEngine, splitStems, splitPasses, play, isFreeMode]);
 
     const handleFileSelection = useCallback(async (files: FileList | File[]) => {
         const paths: string[] = [];
@@ -803,6 +819,16 @@ const ReactorZone: React.FC = () => {
             return;
         }
         
+        // Free mode only allows single-file processing
+        if (isFreeMode && paths.length > 1) {
+            setUiError('Free mode allows single-file processing only. Additional files were ignored.');
+            setPendingFiles([]);
+            setPendingFilePath(paths[0]);
+            setLoadedFilePath(paths[0]);
+            setShowSettings(true);
+            return;
+        }
+
         // If just one, behave as before
         if (paths.length === 1) {
             setPendingFilePath(paths[0]);
@@ -814,7 +840,7 @@ const ReactorZone: React.FC = () => {
             setLoadedFilePath(paths[0]); 
         }
         setShowSettings(true);
-    }, []);
+    }, [isFreeMode]);
 
     const handleResplitStem = useCallback((stemPath: string) => {
         // Treat the stem as a new source file for further splitting
@@ -841,6 +867,15 @@ const ReactorZone: React.FC = () => {
                 if (selected) {
                     const paths = Array.isArray(selected) ? selected : [selected];
                     if (paths.length > 0) {
+                        if (isFreeMode && paths.length > 1) {
+                            setUiError('Free mode allows single-file processing only. Additional files were ignored.');
+                            setPendingFiles([]);
+                            setPendingFilePath(paths[0]);
+                            setLoadedFilePath(paths[0]);
+                            setShowSettings(true);
+                            return;
+                        }
+
                         if (paths.length === 1) {
                             setPendingFilePath(paths[0]);
                             setLoadedFilePath(paths[0]);
@@ -860,7 +895,7 @@ const ReactorZone: React.FC = () => {
             console.error("Failed to open dialog", err);
             play('error_buzz');
         }
-    }, [play, status]);
+    }, [play, status, isFreeMode]);
 
     const handleSelectOutputDir = useCallback(async () => {
         try {
@@ -892,6 +927,12 @@ const ReactorZone: React.FC = () => {
         if (!targetFile) return;
 
         play('click_engage');
+
+        if (isFreeMode) {
+            setUiError('Analysis tools are Pro-only. Free mode supports Spleeter 2-stem, 1-pass MP3 only.');
+            play('error_buzz');
+            return;
+        }
         
         // Handle different tool actions
         if (toolId === 'madmom-bpm' || toolId === 'key-detect' || toolId === 'onset-detect') {
@@ -911,7 +952,7 @@ const ReactorZone: React.FC = () => {
         } else {
             console.log("Tool not yet implemented:", toolId);
         }
-    }, [loadedFilePath, pendingFilePath, startSeparation, play]);
+    }, [loadedFilePath, pendingFilePath, startSeparation, play, isFreeMode]);
 
     // Monitor progress for Analysis Result
     useEffect(() => {
@@ -944,21 +985,25 @@ const ReactorZone: React.FC = () => {
                 setQueueIndex(0);
                 startSeparation(pendingFiles[0], {
                    outputDir: customOutputDir || undefined,
-                   engine: splitEngine,
-                   stems: parseInt(splitStems),
-                   passes: parseInt(splitPasses)
+                   engine: isFreeMode ? 'spleeter' : splitEngine,
+                   stems: isFreeMode ? 2 : parseInt(splitStems),
+                   passes: isFreeMode ? 1 : parseInt(splitPasses),
+                   format: isFreeMode ? 'mp3' : undefined,
+                   applyEffects: !isFreeMode,
                 });
             } else {
                 // SINGLE FILE (Classic)
                 await startSeparation(pendingFilePath, {
                     outputDir: customOutputDir || undefined,
-                    engine: splitEngine,
-                    stems: parseInt(splitStems),
-                    passes: parseInt(splitPasses)
+                    engine: isFreeMode ? 'spleeter' : splitEngine,
+                    stems: isFreeMode ? 2 : parseInt(splitStems),
+                    passes: isFreeMode ? 1 : parseInt(splitPasses),
+                    format: isFreeMode ? 'mp3' : undefined,
+                    applyEffects: !isFreeMode,
                 });
             }
         }
-    }, [pendingFilePath, pendingFiles, startSeparation, play, customOutputDir, splitEngine, splitStems, splitPasses]);
+    }, [pendingFilePath, pendingFiles, startSeparation, play, customOutputDir, splitEngine, splitStems, splitPasses, isFreeMode]);
 
 
     // Main render
@@ -1058,6 +1103,34 @@ const ReactorZone: React.FC = () => {
                     }}>
                         SPLIT
                     </GlitchText>
+
+                    {isFreeMode && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.35 }}
+                            className="mt-5 w-full max-w-xl"
+                        >
+                            <div className="relative overflow-hidden rounded-xl border border-amber-500/35 bg-slate-900/80 backdrop-blur-md shadow-[0_0_24px_rgba(245,158,11,0.15)]">
+                                <div className="absolute inset-0 opacity-[0.07] pointer-events-none bg-[linear-gradient(rgba(245,158,11,0.16)_1px,transparent_1px)] bg-[size:100%_3px]" />
+                                <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-amber-300 via-amber-500 to-amber-700" />
+                                <div className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                    <div className="pl-2">
+                                        <p className="font-mono text-[10px] tracking-[0.24em] text-amber-400/90 uppercase">Free Plan Active</p>
+                                        <p className="font-mono text-xs text-slate-300 mt-1">Spleeter • 2 stems • 1 pass • MP3 output</p>
+                                    </div>
+                                    <button
+                                        onClick={openLicenseModal}
+                                        className="group relative px-4 py-2 rounded-md border border-amber-400/50 text-amber-300 hover:text-slate-950 font-mono text-[10px] tracking-[0.2em] uppercase transition-all duration-200 overflow-hidden"
+                                        title="Unlock full Pro processing"
+                                    >
+                                        <span className="absolute inset-0 bg-gradient-to-r from-amber-500 to-amber-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                        <span className="relative">Upgrade To Pro</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </motion.div>
+                    )}
                 </div>
 
                 {/* Error display */}
@@ -1308,7 +1381,9 @@ const ReactorZone: React.FC = () => {
                                     index={idx}
                                     isFxOpen={activeFxStem === name}
                                     onToggleFX={() => setActiveFxStem(prev => prev === name ? null : name)}
-                                    onResplitStem={() => handleResplitStem(info.file_path)}
+                                    onResplitStem={isFreeMode ? undefined : () => handleResplitStem(info.file_path)}
+                                    fxDisabled={isFreeMode}
+                                    resplitDisabled={isFreeMode}
                                 />
                             ))}
                         </motion.div>
@@ -1347,6 +1422,11 @@ const ReactorZone: React.FC = () => {
                             <h2 className="text-cyan-400 font-mono text-xl mb-4 border-b border-slate-800 pb-2">Separation Configuration</h2>
                             
                             <div className="space-y-4 font-mono text-sm text-slate-300">
+                                {isFreeMode && (
+                                    <div className="bg-amber-900/20 border border-amber-700/50 rounded p-3 text-amber-300 text-xs">
+                                        Free mode is locked to Spleeter, 2 stems, 1 pass, MP3 output.
+                                    </div>
+                                )}
                                 {pendingFilePath && (
                                     <div className="bg-cyan-900/20 border border-cyan-800 p-2 rounded text-xs mb-4 text-cyan-200 break-all">
                                         <span className="text-cyan-500 font-bold block mb-1">
@@ -1377,8 +1457,9 @@ const ReactorZone: React.FC = () => {
                                                 setSplitStems('4');
                                             }
                                         }}
-                                        className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-cyan-50 focus:border-cyan-500 outline-none"
+                                        className={`w-full bg-slate-950 border border-slate-700 rounded p-2 text-cyan-50 focus:border-cyan-500 outline-none ${isFreeMode ? 'opacity-50 cursor-not-allowed' : ''}`}
                                         title="Select the audio separation engine"
+                                        disabled={isFreeMode}
                                     >
                                         <option value="demucs">Demucs (V4, Hybrid)</option>
                                         <option value="mdx">MDX-Net (Quality focus)</option>
@@ -1392,8 +1473,9 @@ const ReactorZone: React.FC = () => {
                                     <label className="block mb-1 text-slate-400">Number of Stems</label>
                                     <select 
                                         value={splitStems} onChange={e => setSplitStems(e.target.value)}
-                                        className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-cyan-50 focus:border-cyan-500 outline-none"
+                                        className={`w-full bg-slate-950 border border-slate-700 rounded p-2 text-cyan-50 focus:border-cyan-500 outline-none ${isFreeMode ? 'opacity-50 cursor-not-allowed' : ''}`}
                                         title="Select the number of stems to separate"
+                                        disabled={isFreeMode}
                                     >
                                         <option value="2" disabled={splitEngine === 'drumsep'}>2-Stem (Vocal / Instrumental)</option>
                                         <option value="4">
@@ -1410,15 +1492,16 @@ const ReactorZone: React.FC = () => {
                                     <label className="block mb-1 text-slate-400">Processing Passes</label>
                                     <select 
                                         value={splitPasses} onChange={e => setSplitPasses(e.target.value)}
-                                        className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-cyan-50 focus:border-cyan-500 outline-none"
+                                        className={`w-full bg-slate-950 border border-slate-700 rounded p-2 text-cyan-50 focus:border-cyan-500 outline-none ${isFreeMode ? 'opacity-50 cursor-not-allowed' : ''}`}
                                         title="Select the number of processing passes"
-                                        disabled={splitEngine === 'spleeter'}
+                                        disabled={splitEngine === 'spleeter' || isFreeMode}
                                     >
                                         <option value="1">1 Pass (Faster)</option>
                                         <option value="2">2 Passes (Cleaner bleeding)</option>
                                         <option value="3">3 Passes (Maximum Quality)</option>
                                     </select>
                                     {splitEngine === 'spleeter' && <span className="text-[10px] text-orange-400 mt-1 block">Passes not available for Spleeter</span>}
+                                    {isFreeMode && <span className="text-[10px] text-amber-300 mt-1 block">Output is locked to MP3 in free mode.</span>}
                                 </div>
                                 
                                 <div>
@@ -1480,7 +1563,7 @@ const ReactorZone: React.FC = () => {
                                        pendingFiles.length > 1 ? "animate-pulse" : "" 
                                     }`}
                                 >
-                                    {pendingFiles.length > 1 ? `SPLIT BATCH (${pendingFiles.length})` : pendingFilePath ? 'EXECUTE SPLIT' : 'Save Config'}
+                                    {pendingFiles.length > 1 && !isFreeMode ? `SPLIT BATCH (${pendingFiles.length})` : pendingFilePath ? (isFreeMode ? 'EXECUTE FREE SPLIT' : 'EXECUTE SPLIT') : 'Save Config'}
                                 </button>
                             </div>
                         </motion.div>

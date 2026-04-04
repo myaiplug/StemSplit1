@@ -48,7 +48,7 @@ Trial vs Pro:
 3. Click **"Next"** through the installer wizard
 4. **Launch** from the Start Menu or Desktop shortcut
 
-**No additional software required** - everything is included!
+**No additional software required** - StemSplit auto-provisions and auto-repairs the AI runtime in the background.
 
 ### macOS Installation
 1. **Download** the correct `.dmg` for your Mac CPU:
@@ -67,7 +67,7 @@ Trial vs Pro:
 
 ### Size Information
 * **Installer Size:** Super light at `~5 MB` (We use an online-installer format so you download instantly).
-* **Installation Size:** Requires internet connection during install to fetch Python, FFmpeg, and AI neural network models (like PyTorch). The completed installation footprint is approximately `3.5 GB` to `5 GB` on your hard drive depending on which separation models you initialize.
+* **Installation Size:** StemSplit installs quickly first, then provisions/repairs Python + AI runtime on first launch. The completed footprint is approximately `3.5 GB` to `5 GB` depending on initialized models.
 
 ### Windows
 - Windows 10 (1809+) or Windows 11
@@ -125,6 +125,10 @@ This means the installer architecture does not match your CPU.
 - Apple Silicon (M1/M2/M3/M4): download `StemSplit_Online_Setup_macOS_AppleSilicon.dmg`
 
 ### Still Having Issues?
+- StemSplit now auto-starts runtime setup and auto-retries fallback strategies on its own.
+- If your internet dropped during first launch, simply reopen StemSplit once and wait for auto-repair.
+- Check diagnostics at `%LOCALAPPDATA%\StemSplit\python-setup-diagnostics.json`.
+- If you build from source, run `./setup_embedded_python.ps1 -RepairIfNeeded` from repo root.
 - [Installation Guide (Windows)](INSTALLATION_WINDOWS.md)
 - [Installation Guide (macOS)](INSTALLATION_MAC.md)
 - [Open an issue](https://github.com/myaiplug/StemSplit1/issues)

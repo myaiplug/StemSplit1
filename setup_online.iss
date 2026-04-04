@@ -42,12 +42,12 @@ Source: "src-tauri\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ign
 Source: "scripts\*"; DestDir: "{app}\scripts"; Flags: recursesubdirs createallsubdirs; Excludes: "logs, __pycache__, .git, .vscode, .idea, *.log, s3_*_folder_lists, test_audio, *.txt, *.bmp, *.png, *.json, *.xml, *.yaml"
 
 ; Model Dependencies
-Source: "drumsep-main\*"; DestDir: "{app}\drumsep-main"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist; Excludes: "__pycache__, .git, *.md, LICENSE, drumsepInstall"
-Source: "MVSEP-MDX23-music-separation-model-main\*"; DestDir: "{app}\MVSEP-MDX23-music-separation-model-main"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist; Excludes: "__pycache__, .git, output, *.wav, gui.py, web-ui.py, *.md, images"
-Source: "UVR\*"; DestDir: "{app}\UVR"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist; Excludes: "__pycache__, .git, *.png, *.jpg"
+Source: "drumsep-main\*"; DestDir: "{app}\drumsep-main"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist; Excludes: "__pycache__, .git, *.md, LICENSE, drumsepInstall, *.th, *.ckpt, *.pt, *.bin, *.onnx"
+Source: "MVSEP-MDX23-music-separation-model-main\*"; DestDir: "{app}\MVSEP-MDX23-music-separation-model-main"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist; Excludes: "__pycache__, .git, output, *.wav, gui.py, web-ui.py, *.md, images, *.th, *.ckpt, *.pt, *.bin, *.onnx"
+Source: "UVR\*"; DestDir: "{app}\UVR"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist; Excludes: "__pycache__, .git, *.png, *.jpg, *.th, *.ckpt, *.pt, *.bin, *.onnx"
 
 ; Trained Models
-Source: "Stem Split Models\*"; DestDir: "{app}\Stem Split Models"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "Stem Split Models\*"; DestDir: "{app}\Stem Split Models"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist; Excludes: "*.th, *.ckpt, *.pt, *.bin, *.onnx"
 
 ; Requirements file for pip
 Source: "requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
@@ -134,9 +134,6 @@ begin
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
-var
-  PythonZip, PythonDir, GetPipPath: String;
-  ResultCode: Integer;
 begin
   Result := True;
   
@@ -145,129 +142,7 @@ begin
     Log('SkipOnlineDownloads enabled; skipping online dependency download/install phase.');
     Exit;
 #endif
-    PythonDir := ExpandConstant('{app}\embedded_python');
-    PythonZip := ExpandConstant('{tmp}\python_embed.zip');
-    GetPipPath := ExpandConstant('{tmp}\get-pip.py');
-    
-    // Check if Python already installed (for upgrades)
-    if FileExists(PythonDir + '\python.exe') then
-    begin
-      Log('Python already installed, skipping download');
-      Exit;
-    end;
-    
-    // Download Python
-    DownloadPage.Clear;
-    DownloadPage.Add('{#PythonURL}', 'python_embed.zip', '');
-    DownloadPage.Add('{#GetPipURL}', 'get-pip.py', '');
-    DownloadPage.Show;
-    
-    try
-      try
-        DownloadPage.Download;
-        Result := True;
-      except
-        if DownloadPage.AbortedByUser then
-          Log('Download aborted by user')
-        else
-          SuppressibleMsgBox(AddPeriod(GetExceptionMessage), mbCriticalError, MB_OK, IDOK);
-        Result := False;
-      end;
-    finally
-      DownloadPage.Hide;
-    end;
-    
-    if Result then
-    begin
-      // Create Python directory
-      ForceDirectories(PythonDir);
-      
-      // Extract Python
-      PythonInstallPage.Show;
-      PythonInstallPage.SetText('Extracting Python...', '');
-      PythonInstallPage.SetProgress(10, 100);
-      
-      if not ExtractZipFile(PythonZip, PythonDir) then
-      begin
-        MsgBox('Failed to extract Python. Please check disk space and try again.', mbError, MB_OK);
-        Result := False;
-        PythonInstallPage.Hide;
-        Exit;
-      end;
-      
-      // Enable import site
-      PythonInstallPage.SetText('Configuring Python...', '');
-      PythonInstallPage.SetProgress(20, 100);
-      EnableImportSite(PythonDir);
-      
-      // Copy get-pip.py to Python dir
-      FileCopy(GetPipPath, PythonDir + '\get-pip.py', False);
-      
-      // Install pip
-      PythonInstallPage.SetText('Installing pip...', '');
-      PythonInstallPage.SetProgress(30, 100);
-      
-      if Exec(PythonDir + '\python.exe', 'get-pip.py --no-warn-script-location', PythonDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-      begin
-        if ResultCode <> 0 then
-        begin
-          MsgBox('Failed to install pip. Error code: ' + IntToStr(ResultCode), mbError, MB_OK);
-          Result := False;
-          PythonInstallPage.Hide;
-          Exit;
-        end;
-      end;
-      
-      // Install requirements
-      PythonInstallPage.SetText('Installing AI packages (this may take 5-15 minutes)...', 'Downloading PyTorch, Demucs, and audio processing libraries');
-      PythonInstallPage.SetProgress(40, 100);
-      
-      // Install PyTorch first (largest package)
-      if Exec(PythonDir + '\python.exe', '-m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 --no-warn-script-location', PythonDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-      begin
-        if ResultCode <> 0 then
-        begin
-          MsgBox('Failed to install PyTorch. Error code: ' + IntToStr(ResultCode), mbError, MB_OK);
-          Result := False;
-          PythonInstallPage.Hide;
-          Exit;
-        end;
-        PythonInstallPage.SetProgress(70, 100);
-      end
-      else
-      begin
-        MsgBox('Failed to launch Python for PyTorch installation.', mbError, MB_OK);
-        Result := False;
-        PythonInstallPage.Hide;
-        Exit;
-      end;
-      
-      // Install other requirements
-      PythonInstallPage.SetText('Installing remaining packages...', '');
-      if Exec(PythonDir + '\python.exe', '-m pip install -r "' + ExpandConstant('{app}\requirements.txt') + '" --no-warn-script-location --no-cache-dir', PythonDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-      begin
-        if ResultCode <> 0 then
-        begin
-          MsgBox('Failed to install required packages. Error code: ' + IntToStr(ResultCode), mbError, MB_OK);
-          Result := False;
-          PythonInstallPage.Hide;
-          Exit;
-        end;
-        PythonInstallPage.SetProgress(95, 100);
-      end
-      else
-      begin
-        MsgBox('Failed to launch Python for package installation.', mbError, MB_OK);
-        Result := False;
-        PythonInstallPage.Hide;
-        Exit;
-      end;
-      
-      // Cleanup
-      DeleteFile(PythonDir + '\get-pip.py');
-      PythonInstallPage.SetProgress(100, 100);
-      PythonInstallPage.Hide;
-    end;
+    Log('StemSplit online installer now defers Python/PyTorch provisioning to first launch so installation can finish even when runtime downloads fail.');
   end;
 end;
 
@@ -275,10 +150,12 @@ function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoType
 begin
   Result := '';
   Result := Result + 'Installation Directory:' + NewLine + Space + ExpandConstant('{app}') + NewLine + NewLine;
-  Result := Result + 'The installer will download:' + NewLine;
-  Result := Result + Space + '• Python 3.10.11 Embedded (~25 MB)' + NewLine;
-  Result := Result + Space + '• PyTorch with CUDA support (~2.5 GB)' + NewLine;
-  Result := Result + Space + '• Demucs and audio libraries (~200 MB)' + NewLine + NewLine;
-  Result := Result + 'Total download: approximately 2.7 GB' + NewLine;
-  Result := Result + 'Installation requires internet connection.' + NewLine;
+  Result := Result + 'Installer behavior:' + NewLine;
+  Result := Result + Space + '• Installs StemSplit immediately without blocking on PyTorch' + NewLine;
+  Result := Result + Space + '• First launch auto-downloads or repairs the AI runtime if needed' + NewLine;
+  Result := Result + Space + '• If GPU packages fail, StemSplit falls back to a CPU-safe runtime automatically' + NewLine + NewLine;
+  Result := Result + 'Recovery and diagnostics:' + NewLine;
+  Result := Result + Space + '• Restarting StemSplit triggers runtime self-repair if setup was interrupted' + NewLine;
+  Result := Result + Space + '• Diagnostics are written to %LOCALAPPDATA%\StemSplit\python-setup-diagnostics.json' + NewLine + NewLine;
+  Result := Result + 'Internet is only required when the app provisions or repairs the AI runtime.' + NewLine;
 end;

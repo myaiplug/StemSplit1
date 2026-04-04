@@ -1,15 +1,16 @@
-torch
-torchaudio
-demucs
+torch==2.5.1
+demucs==4.0.1
 librosa
-pynvml
-psutil
 soundfile
 numpy
 resampy
 tqdm
+
+# Optional enhancements for FX, hardware telemetry, and extra engines
 pedalboard>=0.8.0
 pydub>=0.25.1
+pynvml
+psutil
 sounddevice
 pyloudnorm
 audio-separator[cpu]

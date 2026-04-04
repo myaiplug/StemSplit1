@@ -772,10 +772,19 @@ class AudioSeparator:
             target_sr = model.samplerate  # Use model's expected sample rate
             if sr != target_sr:
                 logger.info(f"Resampling from {sr} to {target_sr}Hz")
-                # Create a resampler
-                from torchaudio.transforms import Resample
-                resampler = Resample(sr, target_sr)
-                waveform = resampler(waveform)
+                try:
+                    from torchaudio.transforms import Resample
+                    resampler = Resample(sr, target_sr)
+                    waveform = resampler(waveform)
+                except Exception as resample_error:
+                    logger.warning(f"Torchaudio resampler unavailable, falling back to librosa: {resample_error}")
+                    resampled = librosa.resample(
+                        waveform.cpu().numpy(),
+                        orig_sr=sr,
+                        target_sr=target_sr,
+                        axis=-1,
+                    )
+                    waveform = torch.from_numpy(np.asarray(resampled, dtype=np.float32))
                 sr = target_sr
             
             # Perform separation using apply_model (requires batch dimension)
@@ -1771,8 +1780,17 @@ def main():
                 config_path = p
                 break
     
+    # Auto-detect best device if available
+    default_device = "cpu"
+    try:
+        import torch
+        if torch.cuda.is_available():
+            default_device = "cuda"
+    except Exception:
+        pass
+
     config = {
-        "device": "cpu",
+        "device": default_device,
         "split_strategy": "default",
         "mkl_threads": 4,
         "output_format": args.format,
@@ -1782,6 +1800,7 @@ def main():
         "stems": args.stems,
         "passes": args.passes,
         "fx_config": fx_config,
+        "shifts": 2 if default_device == "cuda" else 1, # Faster on CPU
     }
 
     if config_path and os.path.exists(config_path):
@@ -1803,7 +1822,7 @@ def main():
         except Exception as e:
             logger.warning(f"Failed to load config from {config_path}: {e}")
     else:
-        logger.warning("No hardware config found. Using default CPU config.")
+        logger.warning(f"No hardware config found. Using default auto-detected config (Device: {default_device}).")
 
     # Initialize separator
     try:

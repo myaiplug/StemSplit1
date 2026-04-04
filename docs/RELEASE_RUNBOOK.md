@@ -15,6 +15,22 @@ python .\scripts\ci\release_preflight.py `
   --md-out "installers/release-preflight.local.md"
 ```
 
+Optional billing gate (recommended before release branches and tags):
+
+```powershell
+python .\scripts\ci\release_preflight.py `
+  --repo-root "." `
+  --json-out "installers/release-preflight.billing.local.json" `
+  --md-out "installers/release-preflight.billing.local.md" `
+  --run-billing-smoke
+```
+
+If rebuilding offline runtime artifacts, run repair-aware embedded setup first:
+
+```powershell
+.\setup_embedded_python.ps1 -RepairIfNeeded
+```
+
 Verify local evidence reports exist and pass:
 
 - `installers/smoke-windows.local.json`
@@ -37,8 +53,11 @@ Required workflows should pass:
 
 - `.github/workflows/installer-windows.yml`
 - `.github/workflows/installer-macos.yml`
+- `.github/workflows/billing-preflight.yml`
 - `.github/workflows/windows-release-signed.yml` (when signing secrets are configured)
 - `.github/workflows/macos-release-signed-notarized.yml` (when Apple signing secrets are configured)
+
+Windows signed release now includes a mandatory embedded runtime repair/verification step (`setup_embedded_python.ps1 -RepairIfNeeded`) before offline installer packaging.
 
 Check uploaded artifacts include:
 
@@ -48,15 +67,25 @@ Check uploaded artifacts include:
 - model payload reports
 - quality gate reports
 
+## Branch Protection Recommendation
+
+For `main` and `release/*`, configure GitHub branch protection to require these status checks:
+
+- `Windows Installer CI / build-and-smoke-test`
+- `Billing Preflight CI / billing-preflight`
+- `Windows Signed Release / build-sign-release` (for tag/release branches when signing is expected)
+
 ## 4. Publish GitHub Release
 
 1. Create tag in GitHub (for example `v0.1.0`).
-2. Create release notes including:
+1. Create release notes including:
+
 - Artifact filenames
 - SHA-256 checksums
 - Platform-specific install notes
-3. Attach built installer artifacts from CI.
-4. Mark as latest if stable.
+
+1. Attach built installer artifacts from CI.
+1. Mark as latest if stable.
 
 ## 5. Post-Release Validation
 

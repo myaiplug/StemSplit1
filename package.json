@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "billing:webhooks": "node ./billing-service/server.mjs",
+    "billing:test:webhooks": "node ./billing-service/webhook-smoke.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.112.0",

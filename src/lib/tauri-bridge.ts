@@ -303,6 +303,36 @@ export async function setupPythonEnvironment(
 }
 
 /**
+ * Run an aggressive runtime deep repair (hard reset + staged reinstall).
+ * @param onProgress Callback for progress updates
+ */
+export async function deepRepairPythonEnvironment(
+  onProgress?: (progress: PythonSetupProgress) => void
+): Promise<string> {
+  try {
+    console.log('[IPC] Starting deep repair for Python environment...');
+
+    let unlisten: (() => void) | null = null;
+    if (onProgress) {
+      unlisten = await listen<PythonSetupProgress>('python-setup-progress', (event) => {
+        onProgress(event.payload);
+      });
+    }
+
+    const result = await invoke<string>('deep_repair_python_environment');
+
+    if (unlisten) unlisten();
+
+    console.log('[IPC] Python deep repair complete:', result);
+    return result;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error('[IPC] Python deep repair failed:', detail);
+    throw new Error(detail);
+  }
+}
+
+/**
  * Listen for Python setup progress events
  */
 export async function onPythonSetupProgress(
@@ -315,15 +345,39 @@ export async function onPythonSetupProgress(
 
 
 export interface LicenseInfo {
-  status: string;
-  key: string | null;
+  is_valid: boolean;
+  is_trial: boolean;
+  purchase_date?: string | null;
+  license_key?: string | null;
+  features?: string[];
+  limitations?: TrialLimitations;
   email: string | null;
   error?: string;
-  limitations?: TrialLimitations;
 }
 
 export interface TrialLimitations {
-  max_stems: number;
+  max_duration_seconds: number;
+  allowed_stems: string[];
+  output_format: string;
+  engine: string;
+  batch_allowed: boolean;
+  fx_allowed: boolean;
+  vst_allowed: boolean;
+  high_quality_preview: boolean;
+}
+
+export interface AuthProfile {
+  username: string;
+  email: string;
+  created_at?: string | null;
+}
+
+export interface AuthResult {
+  success: boolean;
+  profile: AuthProfile | null;
+  onboarding_email_sent: boolean;
+  message: string;
+  error?: string | null;
 }
 
 export async function getLicenseStatus(): Promise<LicenseInfo> {
@@ -331,7 +385,7 @@ export async function getLicenseStatus(): Promise<LicenseInfo> {
     return await invoke<LicenseInfo>('get_license_status');
   } catch (error) {
     console.error('Failed to get license status:', error);
-    return { status: 'free', key: null, email: null };
+    return { is_valid: false, is_trial: true, email: null };
   }
 }
 
@@ -340,7 +394,7 @@ export async function activateLicense(licenseKey: string, email: string): Promis
     return await invoke<LicenseInfo>('activate_license', { licenseKey, email });
   } catch (error) {
     console.error('Failed to activate license:', error);
-    return { status: 'free', key: null, email: null, error: String(error) };
+    return { is_valid: false, is_trial: true, email: null, error: String(error) };
   }
 }
 
@@ -349,16 +403,76 @@ export async function deactivateLicense(): Promise<LicenseInfo> {
     return await invoke<LicenseInfo>('deactivate_license');
   } catch (error) {
     console.error('Failed to deactivate license:', error);
-    return { status: 'free', key: null, email: null };
+    return { is_valid: false, is_trial: true, email: null };
+  }
+}
+
+export async function registerFreeUser(username: string, email: string, password: string): Promise<AuthResult> {
+  try {
+    return await invoke<AuthResult>('register_free_user', { username, email, password });
+  } catch (error) {
+    console.error('Failed to register free user:', error);
+    return {
+      success: false,
+      profile: null,
+      onboarding_email_sent: false,
+      message: 'Signup failed',
+      error: String(error),
+    };
+  }
+}
+
+export async function loginFreeUser(identifier: string, password: string): Promise<AuthResult> {
+  try {
+    return await invoke<AuthResult>('login_free_user', { identifier, password });
+  } catch (error) {
+    console.error('Failed to login free user:', error);
+    return {
+      success: false,
+      profile: null,
+      onboarding_email_sent: false,
+      message: 'Login failed',
+      error: String(error),
+    };
+  }
+}
+
+export async function getFreeUserSession(): Promise<AuthResult> {
+  try {
+    return await invoke<AuthResult>('get_free_user_session');
+  } catch (error) {
+    console.error('Failed to get free user session:', error);
+    return {
+      success: false,
+      profile: null,
+      onboarding_email_sent: false,
+      message: 'No active session',
+      error: String(error),
+    };
+  }
+}
+
+export async function logoutFreeUser(): Promise<AuthResult> {
+  try {
+    return await invoke<AuthResult>('logout_free_user');
+  } catch (error) {
+    console.error('Failed to logout free user:', error);
+    return {
+      success: false,
+      profile: null,
+      onboarding_email_sent: false,
+      message: 'Logout failed',
+      error: String(error),
+    };
   }
 }
 
 export function isPro(license: LicenseInfo | null): boolean {
-  return license?.status === 'pro';
+  return !!license?.is_valid && !license?.is_trial;
 }
 
 export function isTrial(license: LicenseInfo | null): boolean {
-  return license?.status === 'free';
+  return license?.is_trial !== false;
 }
 
 export function hasFeature(license: LicenseInfo | null, feature: string): boolean {

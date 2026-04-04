@@ -19,6 +19,8 @@ interface StemPlayerProps {
     isFxOpen?: boolean;        // controlled from parent (single FX at a time)
     onToggleFX?: () => void;   // parent callback to toggle FX
     onResplitStem?: () => void; // New: Callback to re-process this stem as input
+    fxDisabled?: boolean;
+    resplitDisabled?: boolean;
 }
 
 // Stem type color map
@@ -46,7 +48,7 @@ function formatTime(seconds: number): string {
     return `${m}:${s.toString().padStart(2, '0')}.${ms}`;
 }
 
-const StemPlayer: React.FC<StemPlayerProps> = ({ stemName, filePath, duration, purityScore, index, isFxOpen, onToggleFX, onResplitStem }) => {
+const StemPlayer: React.FC<StemPlayerProps> = ({ stemName, filePath, duration, purityScore, index, isFxOpen, onToggleFX, onResplitStem, fxDisabled = false, resplitDisabled = false }) => {
     const colors = stemColors[stemName] || defaultColors;
     const stemType = stemName as StemType;
 
@@ -59,6 +61,12 @@ const StemPlayer: React.FC<StemPlayerProps> = ({ stemName, filePath, duration, p
     const [localShowFX, setLocalShowFX] = useState(false);
     const showFX = isFxOpen !== undefined ? isFxOpen : localShowFX;
     const toggleFX = onToggleFX || (() => setLocalShowFX(prev => !prev));
+
+    useEffect(() => {
+        if (!fxDisabled || !showFX) return;
+        if (onToggleFX) onToggleFX();
+        else setLocalShowFX(false);
+    }, [fxDisabled, showFX, onToggleFX]);
 
     // Refs
     const containerRef = useRef<HTMLDivElement>(null);
@@ -526,8 +534,8 @@ const StemPlayer: React.FC<StemPlayerProps> = ({ stemName, filePath, duration, p
                         {/* Re-split button */}
                         <ControlBtn 
                             onClick={onResplitStem || (() => {})} 
-                            title="Split this stem further" 
-                            disabled={!onResplitStem}
+                            title={resplitDisabled ? 'Re-split is Pro-only' : 'Split this stem further'} 
+                            disabled={!onResplitStem || resplitDisabled}
                         >
                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
@@ -537,9 +545,10 @@ const StemPlayer: React.FC<StemPlayerProps> = ({ stemName, filePath, duration, p
                         </ControlBtn>
 
                         <ControlBtn 
-                            onClick={toggleFX} 
-                            title="FX Chain" 
-                            active={showFX}
+                            onClick={() => { if (!fxDisabled) toggleFX(); }} 
+                            title={fxDisabled ? 'FX is Pro-only' : 'FX Chain'} 
+                            active={!fxDisabled && showFX}
+                            disabled={fxDisabled}
                             accent={showFX ? colors.wave : undefined}
                         >
                             <span className="text-[8px] font-mono font-bold">FX</span>
@@ -568,7 +577,7 @@ const StemPlayer: React.FC<StemPlayerProps> = ({ stemName, filePath, duration, p
             <StemFXMenu 
                 stemType={stemType} 
                 stemFilePath={currentFilePath} 
-                isOpen={showFX} 
+                isOpen={fxDisabled ? false : showFX} 
                 onApply={(newPath: string) => {
                     console.log("[StemPlayer] Received FX processed file:", newPath);
                     // Force a small delay to ensure file lock is released? Usually fine.
