@@ -82,13 +82,13 @@ const OriginalPlayer: React.FC<OriginalPlayerProps> = ({ filePath, onBassEnergy 
         let audioUrl: string;
         try {
             // Prefer convertFileSrc for asset protocol - much faster and memory efficient
-            const { convertFileSrc } = await import('@tauri-apps/api/tauri');
+            const { convertFileSrc } = await import('@tauri-apps/api/core');
             audioUrl = convertFileSrc(filePath);
         } catch {
             // Fallback to reading binary file into blob (slower, memory heavy)
             try {
-                const { readBinaryFile } = await import('@tauri-apps/api/fs');
-                const bytes = await readBinaryFile(filePath);
+                const { readFile } = await import('@tauri-apps/plugin-fs');
+                const bytes = await readFile(filePath);
                 if (cancelled) return;
                 const ext = filePath.split('.').pop()?.toLowerCase() || 'wav';
                 const mimeMap: Record<string, string> = {

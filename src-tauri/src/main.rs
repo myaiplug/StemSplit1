@@ -16,7 +16,7 @@ use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::{Arc, Mutex};
 use std::path::{Path, PathBuf};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio::time::{sleep, Duration};
 
 #[cfg(target_os = "windows")]
@@ -568,7 +568,7 @@ fn enforce_window_security_policy(app: &tauri::AppHandle) {
         return;
     }
 
-    if let Some(window) = app.get_window("main") {
+    if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_skip_taskbar(true);
         let _ = window.hide();
     }
@@ -3663,6 +3663,9 @@ fn check_python_available() -> bool {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             enforce_window_security_policy(&app.app_handle());
             tauri::async_runtime::spawn(async {

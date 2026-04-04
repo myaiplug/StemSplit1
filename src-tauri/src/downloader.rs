@@ -9,7 +9,7 @@ use reqwest::Client;
 use reqwest::header::{CONTENT_RANGE, RANGE};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use tauri::Window;
+use tauri::{Emitter, Window};
 use tokio::time::sleep;
 
 #[derive(Clone, Serialize)]

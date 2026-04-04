@@ -85,3 +85,42 @@ Resolve the final open Dependabot alert (`rust/glib`, medium) by migrating from 
 2. Lint/build/cargo/installer validator all pass.
 3. Desktop smoke tests pass for separation + repair flows.
 4. Changes are documented in `SECURITY_TRIAGE_2026-04-04.md` addendum.
+
+## Progress Update (2026-04-04)
+
+Completed on this branch:
+
+- Frontend API migration to v2 namespaces/plugins:
+  - `@tauri-apps/api/core` for `invoke`/`convertFileSrc`
+  - `@tauri-apps/plugin-dialog` for dialog APIs
+  - `@tauri-apps/plugin-shell` for external open
+  - `@tauri-apps/plugin-fs` for binary file fallback reads
+- JS dependency upgrades:
+  - `@tauri-apps/api` -> `^2.0.0`
+  - `@tauri-apps/cli` -> `^2.0.0`
+  - added plugin packages (`dialog`, `shell`, `fs`)
+- Rust migration:
+  - `tauri` -> `2`
+  - `tauri-build` -> `2`
+  - added plugin crates and builder registration
+  - migrated to v2 `tauri.conf.json` schema (`productName`/`identifier`/`app`/`bundle`)
+  - updated runtime APIs (`Emitter` trait import, `get_webview_window`)
+
+Validation status on branch:
+
+- `npm run lint`: PASS
+- `npm run build`: PASS
+- `cd src-tauri && cargo check`: PASS
+- `./validate_fail_proof_installer.ps1`: PASS (20/20)
+
+Current blocker:
+
+- `glib` remains at `0.18.5` through `tauri v2.10.3` Linux GTK dependency chain.
+- Forced upgrade test failed:
+  - `cargo update -p glib --precise 0.20.0`
+  - blocked by `gtk ^0.18` required by current Tauri ecosystem.
+
+Conclusion:
+
+- The remaining Dependabot alert cannot be closed by local lockfile pinning in this stack.
+- Final closure depends on upstream Tauri/GTK chain adopting `glib >= 0.20`, or a policy decision to suppress Linux-only advisory risk for Windows-only shipping targets.
