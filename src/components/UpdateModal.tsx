@@ -14,6 +14,17 @@ export default function UpdateModal() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [isOpen, setIsOpen] = useState(false);
 
+  const isNewerVersion = (current: string, latest: string) => {
+    const normalize = (v: string) => v.split(/(?=[a-z])/i).join('.').split(/[.-]/).map(n => parseInt(n) || 0);
+    const c = normalize(current);
+    const l = normalize(latest);
+    for (let i = 0; i < Math.max(c.length, l.length); i++) {
+      if ((l[i] || 0) > (c[i] || 0)) return true;
+      if ((c[i] || 0) > (l[i] || 0)) return false;
+    }
+    return false;
+  };
+
   useEffect(() => {
     async function checkForUpdates() {
       try {
@@ -52,17 +63,6 @@ export default function UpdateModal() {
 
     checkForUpdates();
   }, []);
-
-  const isNewerVersion = (current: string, latest: string) => {
-    const normalize = (v: string) => v.split(/(?=[a-z])/i).join('.').split(/[.-]/).map(n => parseInt(n) || 0);
-    const c = normalize(current);
-    const l = normalize(latest);
-    for (let i = 0; i < Math.max(c.length, l.length); i++) {
-        if ((l[i] || 0) > (c[i] || 0)) return true;
-        if ((c[i] || 0) > (l[i] || 0)) return false;
-    }
-    return false;
-  };
 
   const handleRemindLater = () => {
     localStorage.setItem('stemsplit_update_dismissed', Date.now().toString());
