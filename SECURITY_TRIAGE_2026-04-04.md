@@ -96,3 +96,10 @@ Validation:
 
 1. Let Dependabot rescan after this commit/push and confirm `torch` + `tar` alerts auto-close.
 2. Open a dedicated `tauri-v2-security-upgrade` branch to resolve the remaining `glib` advisory with full desktop regression coverage.
+
+### Post-Push Verification
+
+- Dependabot open alerts after push/rescan: `1`
+- Remaining alert:
+	- `rust/glib` in `src-tauri/Cargo.lock` (medium)
+	- First patched version: `0.20.0`
