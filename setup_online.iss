@@ -3,7 +3,7 @@
 ; This creates a SMALL installer (~100MB) that downloads Python packages during install
 
 #define MyAppName "StemSplit"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.4.0"
 #define MyAppPublisher "StemSplit Team"
 #define MyAppExeName "stem-split.exe"
 #define PythonVersion "3.10.11"
