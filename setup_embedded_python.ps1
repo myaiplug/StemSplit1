@@ -17,7 +17,7 @@ $DEMUCS_VERSION = "4.0.1"
 $DIAGNOSTICS_PATH = "installers\python_runtime_setup_report.json"
 $RUNTIME_MARKER_PATH = "$EMBED_DIR\python_runtime_ready.json"
 $REQUIRED_IMPORTS = @("torch", "demucs", "librosa", "soundfile", "numpy")
-$OPTIONAL_IMPORTS = @("pedalboard", "pydub", "psutil", "pynvml", "sounddevice", "pyloudnorm")
+$OPTIONAL_IMPORTS = @("pedalboard", "pydub", "psutil", "pynvml", "sounddevice", "pyloudnorm", "yt_dlp", "whisper")
 
 function Write-Diagnostics {
     param([hashtable]$Data)
@@ -232,7 +232,7 @@ Invoke-PythonInstallStep "Installing Demucs core..." @("-m", "pip", "install", "
 Invoke-PythonInstallStep "Installing core audio libraries..." @("-m", "pip", "install", "librosa", "soundfile", "numpy", "resampy", "tqdm", "--no-warn-script-location", "--no-cache-dir")
 
 try {
-    Invoke-PythonInstallStep "Installing optional enhancement packages..." @("-m", "pip", "install", "pedalboard>=0.8.0", "pydub>=0.25.1", "pynvml", "psutil", "sounddevice", "pyloudnorm", "audio-separator[cpu]", "--no-warn-script-location", "--no-cache-dir") -BestEffort
+    Invoke-PythonInstallStep "Installing optional enhancement packages..." @("-m", "pip", "install", "pedalboard>=0.8.0", "pydub>=0.25.1", "pynvml", "psutil", "sounddevice", "pyloudnorm", "audio-separator[cpu]", "yt-dlp", "openai-whisper", "--no-warn-script-location", "--no-cache-dir") -BestEffort
 } catch {
     Write-Warning "Optional enhancement packages install failed: $($_.Exception.Message)"
 }

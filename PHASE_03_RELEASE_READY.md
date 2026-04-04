@@ -222,7 +222,7 @@ setup_embedded_python.ps1          +35 lines (marker generation)
 
 ## Risks & Mitigations
 
-| Risk | Severity | Status | Mitigation |
+| Risk             | Severity | Status | Mitigation |
 |------|----------|--------|-----------|
 | Marker corruption | MEDIUM | ✅ OK | Auto-fallback + regen |
 | Network failure | HIGH | ⏳ Phase 4 | Deep Repair staging |
