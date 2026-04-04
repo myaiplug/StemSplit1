@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { JetBrains_Mono, Rajdhani, Manrope, Syncopate } from 'next/font/google';
 import './globals.css';
 import { Providers } from './providers';
@@ -33,7 +33,12 @@ const syncopate = Syncopate({
 export const metadata: Metadata = {
   title: 'StemSplit v1.2 by NoDAW Studio',
   description: 'AI-powered audio stem separation with hardware optimization',
-  viewport: 'width=device-width, initial-scale=1, maximum-scale=1',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
 };
 
 export default function RootLayout({
