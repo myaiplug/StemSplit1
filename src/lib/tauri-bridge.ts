@@ -250,6 +250,77 @@ export interface PythonSetupProgress {
   percent: number;
 }
 
+export interface YouTubeDownloadProgress {
+  message: string;
+  percent: number;
+}
+
+export interface YouTubeDownloadResult {
+  status: string;
+  file_path: string;
+  title: string;
+  duration_seconds: number;
+  output_directory: string;
+  uploader?: string | null;
+  webpage_url?: string | null;
+  mode_used: string;
+  formats_available: string[];
+}
+
+export interface WhisperProgress {
+  message: string;
+  percent: number;
+}
+
+export interface WhisperTranscriptionRequest {
+  inputPath: string;
+  preset?: 'none' | 'clean_speech' | 'podcast_voice' | 'noisy_room' | 'phone_call' | 'lyric_slow' | 'vad_clean';
+  model?: 'auto' | 'tiny' | 'base' | 'small' | 'medium' | 'large';
+  language?: string;
+  task?: 'transcribe' | 'translate';
+  contentType?: 'default' | 'music_lyrics' | 'podcast' | 'interview' | 'lecture' | 'meeting';
+}
+
+export interface WhisperTranscriptionResult {
+  status: string;
+  text_file: string;
+  json_file: string;
+  srt_file: string;
+  vtt_file: string;
+  word_srt_file?: string | null;
+  output_directory: string;
+  model: string;
+  preset: string;
+  task: string;
+  content_type: string;
+  transcript_preview: string;
+  segment_count: number;
+  detected_language?: string | null;
+}
+
+export interface PreSplitProgress {
+  message: string;
+  percent: number;
+}
+
+export interface PreSplitOptions {
+  inputPath: string;
+  convertWav: boolean;
+  normalizeLoudness: boolean;
+  hpssPrepass: boolean;
+  targetSampleRate: number;
+}
+
+export interface PreSplitResult {
+  status: string;
+  output_path: string;
+  duration_seconds: number;
+  sample_rate: number;
+  channels: number;
+  hpss_harmonic?: string | null;
+  hpss_percussive?: string | null;
+}
+
 /**
  * Check if Python environment is ready for stem splitting
  */
@@ -341,6 +412,99 @@ export async function onPythonSetupProgress(
   return await listen<PythonSetupProgress>('python-setup-progress', (event) => {
     callback(event.payload);
   });
+}
+
+export async function downloadYouTubeAudio(
+  url: string,
+  mode: string = 'audio_mp3_320',
+  onProgress?: (progress: YouTubeDownloadProgress) => void
+): Promise<YouTubeDownloadResult> {
+  try {
+    let unlisten: (() => void) | null = null;
+    if (onProgress) {
+      unlisten = await listen<YouTubeDownloadProgress>('youtube-download-progress', (event) => {
+        onProgress(event.payload);
+      });
+    }
+
+    const result = await invoke<YouTubeDownloadResult>('download_youtube_audio', {
+      request: { url, mode },
+    });
+
+    if (unlisten) unlisten();
+    return result;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error('[IPC] YouTube download failed:', detail);
+    throw new Error(detail);
+  }
+}
+
+/**
+ * Preprocess audio for splitting: WAV conversion, loudness normalization, optional HPSS
+ */
+export async function preprocessAudioForSplit(
+  options: PreSplitOptions,
+  onProgress?: (progress: PreSplitProgress) => void
+): Promise<PreSplitResult> {
+  try {
+    let unlisten: (() => void) | null = null;
+    if (onProgress) {
+      unlisten = await listen<PreSplitProgress>('pre-split-progress', (event) => {
+        onProgress(event.payload);
+      });
+    }
+
+    const result = await invoke<PreSplitResult>('preprocess_audio_for_split', {
+      request: {
+        input_path: options.inputPath,
+        convert_wav: options.convertWav,
+        normalize_loudness: options.normalizeLoudness,
+        hpss_prepass: options.hpssPrepass,
+        target_sample_rate: options.targetSampleRate,
+      },
+    });
+
+    if (unlisten) unlisten();
+    console.log('[IPC] Preprocessing complete:', result);
+    return result;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error('[IPC] Preprocessing failed:', detail);
+    throw new Error(detail);
+  }
+}
+
+export async function transcribeAudio(
+  request: WhisperTranscriptionRequest,
+  onProgress?: (progress: WhisperProgress) => void
+): Promise<WhisperTranscriptionResult> {
+  try {
+    let unlisten: (() => void) | null = null;
+    if (onProgress) {
+      unlisten = await listen<WhisperProgress>('whisper-progress', (event) => {
+        onProgress(event.payload);
+      });
+    }
+
+    const result = await invoke<WhisperTranscriptionResult>('transcribe_audio', {
+      request: {
+        input_path: request.inputPath,
+        preset: request.preset,
+        model: request.model,
+        language: request.language,
+        task: request.task,
+        content_type: request.contentType || 'default',
+      },
+    });
+
+    if (unlisten) unlisten();
+    return result;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error('[IPC] Whisper transcription failed:', detail);
+    throw new Error(detail);
+  }
 }
 
 

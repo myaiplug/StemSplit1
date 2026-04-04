@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence, useAnimation } from 'framer-motion';
 import { useStemSplit, StemSplitStatus } from '@/hooks/useStemSplit';
-import { openResultsFolder } from '@/lib/tauri-bridge';
+import { downloadYouTubeAudio, openResultsFolder, transcribeAudio, WhisperTranscriptionResult } from '@/lib/tauri-bridge';
 import { useLicense } from '@/contexts/LicenseContext';
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
 import TitleBar from './TitleBar';
@@ -691,14 +691,34 @@ const ReactorZone: React.FC = () => {
     
     // Settings State
     const [showSettings, setShowSettings] = useState(false);
+    const [showYouTubeModal, setShowYouTubeModal] = useState(false);
+    const [showWhisperModal, setShowWhisperModal] = useState(false);
     const [splitEngine, setSplitEngine] = useState('demucs');
     const [splitStems, setSplitStems] = useState('4');
     const [splitPasses, setSplitPasses] = useState('1');
     const [pendingFilePath, setPendingFilePath] = useState<string | null>(null);
     const [customOutputDir, setCustomOutputDir] = useState<string | null>(null);
     const [loadedFilePath, setLoadedFilePath] = useState<string | null>(null);
+    const [youtubeUrl, setYouTubeUrl] = useState('');
+    const [youtubeMode, setYouTubeMode] = useState<string>('audio_mp3_320');
+    const [youtubeProgress, setYouTubeProgress] = useState<{ message: string; percent: number } | null>(null);
+    const [isDownloadingYouTube, setIsDownloadingYouTube] = useState(false);
+    const [preSplitConvertWav, setPreSplitConvertWav] = useState(true);
+    const [preSplitNormalizeLoudness, setPreSplitNormalizeLoudness] = useState(true);
+    const [preSplitHpssPrepass, setPreSplitHpssPrepass] = useState(false);
+    const [preSplitProgress, setPreSplitProgress] = useState<{ message: string; percent: number } | null>(null);
+    const [isPreprocessing, setIsPreprocessing] = useState(false);
     const [bassEnergy, setBassEnergy] = useState(0);
     const [activeFxStem, setActiveFxStem] = useState<string | null>(null);
+    const [whisperPreset, setWhisperPreset] = useState<'none' | 'clean_speech' | 'podcast_voice' | 'noisy_room' | 'phone_call' | 'lyric_slow' | 'vad_clean'>('clean_speech');
+    const [whisperModel, setWhisperModel] = useState<'auto' | 'tiny' | 'base' | 'small' | 'medium' | 'large'>('auto');
+    const [whisperTask, setWhisperTask] = useState<'transcribe' | 'translate'>('transcribe');
+    const [whisperLanguage, setWhisperLanguage] = useState('');
+    const [whisperContentType, setWhisperContentType] = useState<'default' | 'music_lyrics' | 'podcast' | 'interview' | 'lecture' | 'meeting'>('default');
+    const [whisperProgress, setWhisperProgress] = useState<{ message: string; percent: number } | null>(null);
+    const [isTranscribing, setIsTranscribing] = useState(false);
+    const [transcriptResult, setTranscriptResult] = useState<WhisperTranscriptionResult | null>(null);
+    const [transcriptError, setTranscriptError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const { status, progress: progressEvent, progressPercent, result, error, startSeparation, cancel } = useStemSplit();
     const { isTrial, isPro } = useLicense();
@@ -911,6 +931,93 @@ const ReactorZone: React.FC = () => {
             console.error("Failed to select directory", err);
         }
     }, []);
+
+    const handleImportYouTube = useCallback(async () => {
+        const trimmedUrl = youtubeUrl.trim();
+        if (!trimmedUrl) {
+            setUiError('Paste a YouTube URL to import audio.');
+            play('error_buzz');
+            return;
+        }
+
+        setUiError(null);
+        setIsDownloadingYouTube(true);
+        setYouTubeProgress({ message: 'Preparing YouTube import...', percent: 0 });
+        play('click_engage');
+
+        try {
+            const result = await downloadYouTubeAudio(trimmedUrl, youtubeMode, (progress) => {
+                setYouTubeProgress(progress);
+            });
+
+            setPendingFiles([]);
+            setPendingFilePath(result.file_path);
+            setLoadedFilePath(result.file_path);
+            setShowYouTubeModal(false);
+            setYouTubeUrl('');
+            setYouTubeProgress(null);
+            setShowSettings(true);
+            play('success_chime');
+        } catch (err) {
+            const detail = err instanceof Error ? err.message : String(err);
+            setUiError(detail);
+            setYouTubeProgress({ message: detail, percent: 0 });
+            play('error_buzz');
+        } finally {
+            setIsDownloadingYouTube(false);
+        }
+    }, [play, youtubeUrl, youtubeMode]);
+
+    const handleOpenWhisper = useCallback(() => {
+        if (!loadedFilePath && !pendingFilePath) {
+            setUiError('Load or import an audio file before opening Whisper transcription.');
+            play('error_buzz');
+            return;
+        }
+
+        setTranscriptError(null);
+        setShowWhisperModal(true);
+        play('click_engage');
+    }, [loadedFilePath, pendingFilePath, play]);
+
+    const handleStartWhisper = useCallback(async () => {
+        const targetFile = loadedFilePath || pendingFilePath;
+        if (!targetFile) {
+            setTranscriptError('No source audio is currently loaded.');
+            play('error_buzz');
+            return;
+        }
+
+        setTranscriptError(null);
+        setTranscriptResult(null);
+        setWhisperProgress({ message: 'Preparing transcription pipeline...', percent: 0 });
+        setIsTranscribing(true);
+        play('click_engage');
+
+        try {
+            const result = await transcribeAudio({
+                inputPath: targetFile,
+                preset: whisperPreset,
+                model: whisperModel,
+                language: whisperLanguage.trim(),
+                task: whisperTask,
+                contentType: whisperContentType,
+            }, (progress) => {
+                setWhisperProgress(progress);
+            });
+
+            setTranscriptResult(result);
+            setWhisperProgress({ message: 'Transcript ready.', percent: 100 });
+            play('success_chime');
+        } catch (err) {
+            const detail = err instanceof Error ? err.message : String(err);
+            setTranscriptError(detail);
+            setWhisperProgress({ message: detail, percent: 0 });
+            play('error_buzz');
+        } finally {
+            setIsTranscribing(false);
+        }
+    }, [loadedFilePath, pendingFilePath, play, whisperLanguage, whisperModel, whisperPreset, whisperTask, whisperContentType]);
 
     // --- Analysis Tool Trigger ---
     const [analysisResult, setAnalysisResult] = useState<any>(null);
@@ -1390,13 +1497,41 @@ const ReactorZone: React.FC = () => {
                     )}
                 </AnimatePresence>
                 
-                {/* Settings Toggle Button */}
-                <button 
-                    onClick={() => setShowSettings(true)}
-                    className="mt-8 px-4 py-2 border border-slate-700 text-slate-400 hover:text-cyan-400 hover:border-cyan-800 rounded font-mono text-xs transition-colors"
-                >
-                    [ CONFIG OPTIONS ]
-                </button>
+                <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+                    <button 
+                        onClick={() => setShowSettings(true)}
+                        className="px-4 py-2 border border-slate-700 text-slate-400 hover:text-cyan-400 hover:border-cyan-800 rounded font-mono text-xs transition-colors"
+                    >
+                        [ CONFIG OPTIONS ]
+                    </button>
+                    <button 
+                        onClick={() => {
+                            setUiError(null);
+                            setYouTubeProgress(null);
+                            setShowYouTubeModal(true);
+                            play('click_engage');
+                        }}
+                        className="px-4 py-2 border border-slate-700 text-slate-300 hover:text-cyan-300 hover:border-cyan-700 rounded font-mono text-xs transition-colors shadow-[0_0_10px_rgba(34,211,238,0.12)]"
+                    >
+                        [ YOUTUBE IMPORT ]
+                    </button>
+                    <button 
+                        onClick={handleOpenWhisper}
+                        disabled={!loadedFilePath && !pendingFilePath}
+                        className={`px-4 py-2 rounded font-mono text-xs transition-colors ${loadedFilePath || pendingFilePath
+                            ? 'border border-cyan-500/30 text-cyan-100 hover:bg-cyan-900/40 hover:border-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.16)]'
+                            : 'border border-slate-800 text-slate-600 cursor-not-allowed'
+                        }`}
+                    >
+                        [ WHISPER TRANSCRIPT ]
+                    </button>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-center gap-3 text-[9px] font-mono uppercase tracking-[0.2em] text-slate-500">
+                    <span>{loadedFilePath || pendingFilePath ? 'Source Ready' : 'No Source Loaded'}</span>
+                    {(loadedFilePath || pendingFilePath) && (
+                        <span className="text-cyan-500/70">Transcript and YouTube ingest follow Cyber-HUD pipeline styling</span>
+                    )}
+                </div>
             </div>
 
             {/* Config Modal */}
@@ -1503,6 +1638,51 @@ const ReactorZone: React.FC = () => {
                                     {splitEngine === 'spleeter' && <span className="text-[10px] text-orange-400 mt-1 block">Passes not available for Spleeter</span>}
                                     {isFreeMode && <span className="text-[10px] text-amber-300 mt-1 block">Output is locked to MP3 in free mode.</span>}
                                 </div>
+
+                                <div className="border-t border-slate-800 pt-4 mt-4">
+                                    <h3 className="text-cyan-400 font-mono text-sm mb-3 flex items-center gap-2">
+                                        <span className="text-xs">PRE-SPLIT QUALITY</span>
+                                    </h3>
+                                    <div className="space-y-3 text-xs">
+                                        <label className="flex items-center gap-2 cursor-pointer hover:text-slate-200 transition-colors">
+                                            <input
+                                                type="checkbox"
+                                                checked={preSplitConvertWav}
+                                                onChange={(e) => setPreSplitConvertWav(e.target.checked)}
+                                                className="w-4 h-4 accent-cyan-500"
+                                                title="Convert lossy formats (MP3, AAC) to lossless PCM WAV before splitting"
+                                            />
+                                            <span>Convert to WAV</span>
+                                            <span className="text-slate-500">(eliminates codec artifacts)</span>
+                                        </label>
+                                        <label className="flex items-center gap-2 cursor-pointer hover:text-slate-200 transition-colors">
+                                            <input
+                                                type="checkbox"
+                                                checked={preSplitNormalizeLoudness}
+                                                onChange={(e) => setPreSplitNormalizeLoudness(e.target.checked)}
+                                                className="w-4 h-4 accent-cyan-500"
+                                                title="Normalize audio to -16 LUFS to prevent separator overload"
+                                            />
+                                            <span>Normalize Loudness</span>
+                                            <span className="text-slate-500">(-16 LUFS target)</span>
+                                        </label>
+                                        <label className="flex items-center gap-2 cursor-pointer hover:text-slate-200 transition-colors">
+                                            <input
+                                                type="checkbox"
+                                                checked={preSplitHpssPrepass}
+                                                onChange={(e) => setPreSplitHpssPrepass(e.target.checked)}
+                                                disabled={isFreeMode}
+                                                className={`w-4 h-4 accent-cyan-500 ${isFreeMode ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                title="Split into harmonic/percussive domains before separation (slower)"
+                                            />
+                                            <span>HPSS Pre-pass</span>
+                                            <span className="text-slate-500">(slower, cleaner drums)</span>
+                                        </label>
+                                        <p className="text-slate-500 italic text-[10px] mt-2 leading-relaxed">
+                                            Preprocessing passes run before the stem separator. Recommended: WAV conversion only for most sources.
+                                        </p>
+                                    </div>
+                                </div>
                                 
                                 <div>
                                     <label className="block mb-1 text-slate-400">Output Folder</label>
@@ -1564,6 +1744,378 @@ const ReactorZone: React.FC = () => {
                                     }`}
                                 >
                                     {pendingFiles.length > 1 && !isFreeMode ? `SPLIT BATCH (${pendingFiles.length})` : pendingFilePath ? (isFreeMode ? 'EXECUTE FREE SPLIT' : 'EXECUTE SPLIT') : 'Save Config'}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+                {showYouTubeModal && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                        onClick={() => {
+                            if (!isDownloadingYouTube) {
+                                setShowYouTubeModal(false);
+                            }
+                        }}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.95, y: 20 }}
+                            animate={{ scale: 1, y: 0 }}
+                            exit={{ scale: 0.95, y: 20 }}
+                            className="w-full max-w-md rounded-xl border border-cyan-900/50 bg-slate-900/95 backdrop-blur-xl shadow-2xl shadow-cyan-900/20 overflow-hidden"
+                            onClick={(event) => event.stopPropagation()}
+                        >
+                            <div className="border-b border-slate-800 bg-slate-900/80 px-6 py-4">
+                                <p className="text-[10px] font-mono uppercase tracking-[0.3em] text-cyan-500">Source Ingest</p>
+                                <h2 className="mt-1 font-mono text-xl text-cyan-300">YouTube Audio Import</h2>
+                                <p className="mt-2 text-xs text-slate-400">Import a track, cache it locally, then drop directly into the existing split configuration pipeline.</p>
+                            </div>
+
+                            <div className="space-y-4 px-6 py-5 font-mono text-sm text-slate-300">
+                                <div className="rounded-xl border border-slate-700/50 bg-slate-900 p-4 shadow-[0_0_10px_rgba(34,211,238,0.08)]">
+                                    <label className="mb-2 block text-[10px] uppercase tracking-[0.24em] text-slate-500">YouTube URL</label>
+                                    <input
+                                        value={youtubeUrl}
+                                        onChange={(event) => setYouTubeUrl(event.target.value)}
+                                        placeholder="https://www.youtube.com/watch?v=..."
+                                        className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-cyan-50 focus:border-cyan-500 outline-none text-xs"
+                                        disabled={isDownloadingYouTube}
+                                    />
+                                    <p className="mt-2 text-[10px] text-slate-500">The imported MP3 is staged locally, then becomes the active source for split or transcript workflows.</p>
+                                </div>
+
+                                <div className="rounded-xl border border-slate-700/50 bg-slate-900 p-4 shadow-[0_0_10px_rgba(34,211,238,0.08)]">
+                                    <label className="mb-3 block text-[10px] uppercase tracking-[0.24em] text-slate-500">Download Format</label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                            <p className="text-[9px] uppercase tracking-[0.2em] text-slate-400 mb-2">Audio Formats</p>
+                                            {['audio_mp3_320', 'audio_mp3_192', 'audio_mp3_128', 'audio_wav', 'audio_flac'].map((mode) => (
+                                                <label key={mode} className="flex items-center gap-2 mb-2 cursor-pointer hover:bg-slate-800 p-1.5 rounded">
+                                                    <input
+                                                        type="radio"
+                                                        name="youtube-mode"
+                                                        value={mode}
+                                                        checked={youtubeMode === mode}
+                                                        onChange={(e) => setYouTubeMode(e.target.value)}
+                                                        disabled={isDownloadingYouTube}
+                                                        className="w-3 h-3"
+                                                    />
+                                                    <span className="text-xs text-slate-300">
+                                                        {mode.includes('320') && 'MP3 320kbps'}
+                                                        {mode.includes('192') && 'MP3 192kbps'}
+                                                        {mode.includes('128') && 'MP3 128kbps'}
+                                                        {mode === 'audio_wav' && 'WAV'}
+                                                        {mode === 'audio_flac' && 'FLAC'}
+                                                    </span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                        <div>
+                                            <p className="text-[9px] uppercase tracking-[0.2em] text-slate-400 mb-2">Video Formats</p>
+                                            {['video_360p', 'video_720p', 'video_1080p'].map((mode) => (
+                                                <label key={mode} className="flex items-center gap-2 mb-2 cursor-pointer hover:bg-slate-800 p-1.5 rounded">
+                                                    <input
+                                                        type="radio"
+                                                        name="youtube-mode"
+                                                        value={mode}
+                                                        checked={youtubeMode === mode}
+                                                        onChange={(e) => setYouTubeMode(e.target.value)}
+                                                        disabled={isDownloadingYouTube}
+                                                        className="w-3 h-3"
+                                                    />
+                                                    <span className="text-xs text-slate-300">
+                                                        {mode === 'video_360p' && '360p'}
+                                                        {mode === 'video_720p' && '720p HD'}
+                                                        {mode === 'video_1080p' && '1080p FHD'}
+                                                    </span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="rounded-xl border border-slate-700/50 bg-slate-950/90 p-4">
+                                    <div className="flex items-center gap-3">
+                                        <div className="relative flex h-4 w-4 items-center justify-center rounded-full border border-slate-700 bg-slate-900">
+                                            <motion.div
+                                                className={`h-2 w-2 rounded-full ${isDownloadingYouTube ? 'bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.6)]' : youtubeProgress?.percent === 100 ? 'bg-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.6)]' : 'bg-slate-700'}`}
+                                                animate={isDownloadingYouTube ? { opacity: [0.4, 1, 0.4], scale: [1, 1.4, 1] } : { opacity: 1, scale: 1 }}
+                                                transition={{ duration: 1.8, repeat: isDownloadingYouTube ? Infinity : 0 }}
+                                            />
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                            <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Import Telemetry</p>
+                                            <p className="mt-1 text-xs text-cyan-50">{youtubeProgress?.message || 'Awaiting URL input.'}</p>
+                                        </div>
+                                        <span className="text-[10px] tabular-nums text-slate-500">{youtubeProgress?.percent ?? 0}%</span>
+                                    </div>
+                                    <div className="mt-3 h-1 w-full overflow-hidden rounded-full bg-slate-800">
+                                        <motion.div
+                                            className="h-full bg-gradient-to-r from-cyan-500/70 via-cyan-400 to-cyan-300 shadow-[0_0_15px_rgba(34,211,238,0.4)]"
+                                            animate={{ width: `${youtubeProgress?.percent ?? 0}%` }}
+                                            transition={{ type: 'spring', stiffness: 80, damping: 18 }}
+                                        />
+                                    </div>
+                                </div>
+
+                                {uiError && showYouTubeModal && (
+                                    <div className="rounded border border-red-500/30 bg-red-950/30 px-4 py-2 text-xs text-red-300 backdrop-blur-sm">
+                                        {uiError}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex justify-end gap-3 border-t border-slate-800 bg-slate-900/80 px-6 py-4">
+                                <button
+                                    onClick={() => setShowYouTubeModal(false)}
+                                    disabled={isDownloadingYouTube}
+                                    className="px-4 py-2 border border-slate-700 rounded text-slate-300 hover:bg-slate-800 transition-colors disabled:opacity-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleImportYouTube}
+                                    disabled={isDownloadingYouTube}
+                                    className="px-6 py-2 bg-cyan-900 border border-cyan-500 rounded text-cyan-50 hover:bg-cyan-800 transition-colors font-bold shadow-lg shadow-cyan-900/50 disabled:opacity-60"
+                                >
+                                    {isDownloadingYouTube ? 'IMPORTING...' : 'IMPORT AUDIO'}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+                {showWhisperModal && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                        onClick={() => {
+                            if (!isTranscribing) {
+                                setShowWhisperModal(false);
+                            }
+                        }}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.95, y: 20 }}
+                            animate={{ scale: 1, y: 0 }}
+                            exit={{ scale: 0.95, y: 20 }}
+                            className="w-full max-w-2xl rounded-2xl border border-cyan-900/50 bg-slate-900/95 backdrop-blur-xl shadow-2xl shadow-cyan-900/20 overflow-hidden"
+                            onClick={(event) => event.stopPropagation()}
+                        >
+                            <div className="border-b border-slate-800 bg-slate-900/80 px-6 py-4">
+                                <p className="text-[10px] font-mono uppercase tracking-[0.3em] text-cyan-500">Whisper Module</p>
+                                <h2 className="mt-1 font-mono text-xl text-cyan-300">Transcription Console</h2>
+                                <p className="mt-2 text-xs text-slate-400">Generate a transcript or translated subtitle pass for the currently loaded source using the same Cyber-HUD control language.</p>
+                            </div>
+
+                            <div className="grid gap-6 px-6 py-5 lg:grid-cols-[1.1fr_0.9fr]">
+                                <div className="space-y-4">
+                                    <div className="grid gap-4 sm:grid-cols-2">
+                                        <div>
+                                            <label className="block mb-1 text-slate-400 text-[10px] uppercase tracking-[0.24em]">Preprocess Preset</label>
+                                            <select
+                                                value={whisperPreset}
+                                                onChange={(event) => setWhisperPreset(event.target.value as typeof whisperPreset)}
+                                                title="Whisper preprocess preset"
+                                                className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-cyan-50 focus:border-cyan-500 outline-none"
+                                                disabled={isTranscribing}
+                                            >
+                                                <option value="clean_speech">Clean Speech</option>
+                                                <option value="podcast_voice">Podcast Voice</option>
+                                                <option value="noisy_room">Noisy Room</option>
+                                                <option value="phone_call">Phone Call</option>
+                                                <option value="lyric_slow">Lyric Slow (0.80x)</option>
+                                                <option value="vad_clean">VAD Clean</option>
+                                                <option value="none">None</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block mb-1 text-slate-400 text-[10px] uppercase tracking-[0.24em]">Whisper Model</label>
+                                            <select
+                                                value={whisperModel}
+                                                onChange={(event) => setWhisperModel(event.target.value as typeof whisperModel)}
+                                                title="Whisper model selection"
+                                                className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-cyan-50 focus:border-cyan-500 outline-none"
+                                                disabled={isTranscribing}
+                                            >
+                                                <option value="auto">Auto</option>
+                                                <option value="tiny">Tiny</option>
+                                                <option value="base">Base</option>
+                                                <option value="small">Small</option>
+                                                <option value="medium">Medium</option>
+                                                <option value="large">Large</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block mb-1 text-slate-400 text-[10px] uppercase tracking-[0.24em]">Task</label>
+                                            <select
+                                                value={whisperTask}
+                                                onChange={(event) => setWhisperTask(event.target.value as typeof whisperTask)}
+                                                title="Whisper transcription task"
+                                                className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-cyan-50 focus:border-cyan-500 outline-none"
+                                                disabled={isTranscribing}
+                                            >
+                                                <option value="transcribe">Transcribe</option>
+                                                <option value="translate">Translate to English</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block mb-1 text-slate-400 text-[10px] uppercase tracking-[0.24em]">Language Hint</label>
+                                            <input
+                                                value={whisperLanguage}
+                                                onChange={(event) => setWhisperLanguage(event.target.value)}
+                                                placeholder="Auto detect"
+                                                className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-cyan-50 focus:border-cyan-500 outline-none text-xs"
+                                                disabled={isTranscribing}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block mb-1 text-slate-400 text-[10px] uppercase tracking-[0.24em]">Content Type Hint</label>
+                                            <select
+                                                value={whisperContentType}
+                                                onChange={(event) => setWhisperContentType(event.target.value as typeof whisperContentType)}
+                                                title="Content type for Whisper hints"
+                                                className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-cyan-50 focus:border-cyan-500 outline-none"
+                                                disabled={isTranscribing}
+                                            >
+                                                <option value="default">Default</option>
+                                                <option value="music_lyrics">Music Lyrics</option>
+                                                <option value="podcast">Podcast</option>
+                                                <option value="interview">Interview</option>
+                                                <option value="lecture">Lecture</option>
+                                                <option value="meeting">Meeting</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-xl border border-slate-700/50 bg-slate-950/90 p-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="relative flex h-4 w-4 items-center justify-center rounded-full border border-slate-700 bg-slate-900">
+                                                <motion.div
+                                                    className={`h-2 w-2 rounded-full ${isTranscribing ? 'bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.6)]' : transcriptResult ? 'bg-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.6)]' : transcriptError ? 'bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.6)]' : 'bg-slate-700'}`}
+                                                    animate={isTranscribing ? { opacity: [0.4, 1, 0.4], scale: [1, 1.4, 1] } : { opacity: 1, scale: 1 }}
+                                                    transition={{ duration: 2, repeat: isTranscribing ? Infinity : 0 }}
+                                                />
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Transcription Telemetry</p>
+                                                <p className="mt-1 text-xs text-cyan-50">{whisperProgress?.message || 'Ready to run Whisper.'}</p>
+                                            </div>
+                                            <span className="text-[10px] tabular-nums text-slate-500">{whisperProgress?.percent ?? 0}%</span>
+                                        </div>
+                                        <div className="mt-3 h-1 w-full overflow-hidden rounded-full bg-slate-800">
+                                            <motion.div
+                                                className="h-full bg-gradient-to-r from-cyan-500/70 via-cyan-400 to-cyan-300 shadow-[0_0_15px_rgba(34,211,238,0.4)]"
+                                                animate={{ width: `${whisperProgress?.percent ?? 0}%` }}
+                                                transition={{ type: 'spring', stiffness: 80, damping: 18 }}
+                                            />
+                                        </div>
+                                        {transcriptError && (
+                                            <div className="mt-3 rounded border border-red-500/30 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+                                                {transcriptError}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="rounded-xl border border-slate-700/50 bg-slate-950/90 p-4 flex flex-col">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Transcript Preview</p>
+                                            <p className="mt-1 text-xs text-slate-400">TXT, JSON, SRT, and VTT output formats. Word-level timestamps in .word.srt (optional).</p>
+                                        </div>
+                                        {transcriptResult?.detected_language && (
+                                            <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]">
+                                                {transcriptResult.detected_language.toUpperCase()}
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    <div className="mt-4 min-h-[220px] flex-1 rounded-lg border border-slate-800 bg-slate-950/70 p-4 overflow-y-auto">
+                                        {transcriptResult ? (
+                                            <div className="space-y-4">
+                                                <div className="grid grid-cols-3 gap-3 text-[10px] uppercase tracking-[0.24em] text-slate-500">
+                                                    <div>
+                                                        <span className="block text-slate-600">Model</span>
+                                                        <span className="mt-1 block text-cyan-300 text-xs normal-case tracking-normal">{transcriptResult.model}</span>
+                                                    </div>
+                                                    <div>
+                                                        <span className="block text-slate-600">Segments</span>
+                                                        <span className="mt-1 block text-cyan-300 text-xs normal-case tracking-normal">{transcriptResult.segment_count}</span>
+                                                    </div>
+                                                    <div>
+                                                        <span className="block text-slate-600">Content Type</span>
+                                                        <span className="mt-1 block text-cyan-300 text-xs normal-case tracking-normal">{transcriptResult.content_type}</span>
+                                                    </div>
+                                                </div>
+                                                <div className="h-[1px] bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent" />
+                                                <div className="space-y-2">
+                                                    <p className="text-[9px] uppercase tracking-[0.2em] text-slate-500">Output Files:</p>
+                                                    <div className="text-[9px] space-y-1 text-slate-300 font-mono">
+                                                        <div className="flex items-center gap-2"><span className="text-emerald-400">✓</span> {transcriptResult.text_file.split('\\').pop()}</div>
+                                                        <div className="flex items-center gap-2"><span className="text-emerald-400">✓</span> {transcriptResult.json_file.split('\\').pop()}</div>
+                                                        <div className="flex items-center gap-2"><span className="text-emerald-400">✓</span> {transcriptResult.srt_file.split('\\').pop()}</div>
+                                                        <div className="flex items-center gap-2"><span className="text-emerald-400">✓</span> {transcriptResult.vtt_file.split('\\').pop()}</div>
+                                                        {transcriptResult.word_srt_file && (
+                                                            <div className="flex items-center gap-2"><span className="text-emerald-400">✓</span> {transcriptResult.word_srt_file.split('\\').pop()}</div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <div className="h-[1px] bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent" />
+                                                <pre className="whitespace-pre-wrap break-words text-xs leading-6 text-slate-200 font-mono">{transcriptResult.transcript_preview || 'Transcript completed. Open the output folder to inspect the generated files.'}</pre>
+                                            </div>
+                                        ) : (
+                                            <div className="flex h-full items-center justify-center text-center text-xs text-slate-500 font-mono uppercase tracking-[0.2em]">
+                                                Transcript preview will appear here after Whisper finishes.
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="mt-4 flex flex-wrap justify-end gap-3">
+                                        {transcriptResult && (
+                                            <>
+                                                <button
+                                                    onClick={() => navigator.clipboard.writeText(transcriptResult.transcript_preview || '')}
+                                                    className="px-4 py-2 border border-slate-700 rounded text-slate-300 hover:bg-slate-800 transition-colors text-xs"
+                                                >
+                                                    COPY PREVIEW
+                                                </button>
+                                                <button
+                                                    onClick={() => openResultsFolder(transcriptResult.output_directory)}
+                                                    className="px-4 py-2 border border-slate-700 rounded text-slate-300 hover:bg-slate-800 transition-colors text-xs"
+                                                >
+                                                    OPEN FOLDER
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-end gap-3 border-t border-slate-800 bg-slate-900/80 px-6 py-4">
+                                <button
+                                    onClick={() => setShowWhisperModal(false)}
+                                    disabled={isTranscribing}
+                                    className="px-4 py-2 border border-slate-700 rounded text-slate-300 hover:bg-slate-800 transition-colors disabled:opacity-50"
+                                >
+                                    Close
+                                </button>
+                                <button
+                                    onClick={handleStartWhisper}
+                                    disabled={isTranscribing}
+                                    className="px-6 py-2 bg-cyan-900 border border-cyan-500 rounded text-cyan-50 hover:bg-cyan-800 transition-colors font-bold shadow-lg shadow-cyan-900/50 disabled:opacity-60"
+                                >
+                                    {isTranscribing ? 'TRANSCRIBING...' : 'RUN WHISPER'}
                                 </button>
                             </div>
                         </motion.div>

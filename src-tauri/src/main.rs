@@ -1947,6 +1947,79 @@ pub struct StemSplitRequest {
     pub passes: Option<u32>,
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct YouTubeDownloadRequest {
+    pub url: String,
+    #[serde(default = "default_youtube_mode")]
+    pub mode: String,
+}
+
+fn default_youtube_mode() -> String {
+    "audio_mp3_320".to_string()
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct YouTubeDownloadResult {
+    pub status: String,
+    pub file_path: String,
+    pub title: String,
+    pub duration_seconds: f64,
+    pub output_directory: String,
+    pub uploader: Option<String>,
+    pub webpage_url: Option<String>,
+    pub mode_used: String,
+    pub formats_available: Vec<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct PreSplitOptions {
+    pub input_path: String,
+    pub convert_wav: bool,
+    pub normalize_loudness: bool,
+    pub hpss_prepass: bool,
+    pub target_sample_rate: u32,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct PreSplitResult {
+    pub status: String,
+    pub output_path: String,
+    pub duration_seconds: f64,
+    pub sample_rate: u32,
+    pub channels: u32,
+    pub hpss_harmonic: Option<String>,
+    pub hpss_percussive: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct WhisperTranscriptionRequest {
+    pub input_path: String,
+    pub preset: Option<String>,
+    pub model: Option<String>,
+    pub language: Option<String>,
+    pub task: Option<String>,
+    #[serde(default)]
+    pub content_type: String,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct WhisperTranscriptionResult {
+    pub status: String,
+    pub text_file: String,
+    pub json_file: String,
+    pub srt_file: String,
+    pub vtt_file: String,
+    pub word_srt_file: Option<String>,
+    pub output_directory: String,
+    pub model: String,
+    pub preset: String,
+    pub task: String,
+    pub content_type: String,
+    pub transcript_preview: String,
+    pub segment_count: usize,
+    pub detected_language: Option<String>,
+}
+
 // ============================================================================
 // Global State for Tracking Operations
 // ============================================================================
@@ -2085,6 +2158,50 @@ fn get_app_root_dir() -> Result<PathBuf, String> {
     }
 
     std::env::current_dir().map_err(|e| format!("Failed to resolve app root: {}", e))
+}
+
+fn get_local_feature_data_dir(feature_name: &str) -> Result<PathBuf, String> {
+    let base = dirs::data_local_dir()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        .join("StemSplit")
+        .join(feature_name);
+
+    std::fs::create_dir_all(&base)
+        .map_err(|e| format!("Failed to create feature data directory '{}': {}", base.display(), e))?;
+
+    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
+    let mut candidate = base.join(&stamp);
+    let mut counter = 1;
+    while candidate.exists() {
+        candidate = base.join(format!("{}-{}", stamp, counter));
+        counter += 1;
+    }
+
+    std::fs::create_dir_all(&candidate)
+        .map_err(|e| format!("Failed to create working directory '{}': {}", candidate.display(), e))?;
+    Ok(candidate)
+}
+
+fn get_transcript_output_dir(source_path: &Path) -> Result<PathBuf, String> {
+    let parent = source_path
+        .parent()
+        .ok_or_else(|| format!("Failed to resolve parent folder for '{}'", source_path.display()))?;
+    let stem = source_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("audio")
+        .to_string();
+
+    let mut candidate = parent.join(format!("{} Transcript", stem));
+    let mut counter = 1;
+    while candidate.exists() {
+        candidate = parent.join(format!("{} Transcript ({})", stem, counter));
+        counter += 1;
+    }
+
+    std::fs::create_dir_all(&candidate)
+        .map_err(|e| format!("Failed to create transcript directory '{}': {}", candidate.display(), e))?;
+    Ok(candidate)
 }
 
 fn get_asset_base_url() -> String {
@@ -2487,6 +2604,462 @@ fn open_results_folder(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn preprocess_audio_for_split(
+    request: PreSplitOptions,
+    window: tauri::Window,
+) -> Result<PreSplitResult, String> {
+    let source_path = PathBuf::from(&request.input_path);
+    if !source_path.exists() {
+        return Err(format!("Audio file not found: {}", source_path.display()));
+    }
+
+    let python_exe = get_python_executable().ok_or_else(|| {
+        "Python runtime is not available. Run the built-in environment setup first.".to_string()
+    })?;
+
+    let env_dir = get_python_env_dir();
+    let script_path = resolve_python_script_path("pre_split_processor.py");
+    if !script_path.exists() {
+        return Err(format!("pre_split_processor.py not found at {}", script_path.display()));
+    }
+
+    // Ensure optional dependencies for preprocessing
+    let mut missing_modules = Vec::new();
+    if request.normalize_loudness {
+        missing_modules.extend_from_slice(&["pyloudnorm", "soundfile"]);
+    }
+    if request.hpss_prepass {
+        missing_modules.extend_from_slice(&["librosa", "soundfile"]);
+    }
+
+    if !missing_modules.is_empty() {
+        let _ = window.emit("pre-split-progress", serde_json::json!({
+            "message": "Installing preprocessing runtime...",
+            "percent": 3
+        }));
+        let packages: Vec<&str> = missing_modules.iter().map(|m| {
+            match *m {
+                "pyloudnorm" => "pyloudnorm",
+                "soundfile" => "soundfile",
+                "librosa" => "librosa",
+                _ => m,
+            }
+        }).collect();
+        install_python_packages(&python_exe, &env_dir, "Install preprocessing dependencies", &packages)?;
+    }
+
+    let output_dir = get_local_feature_data_dir("preprocessed")?;
+    let mut cmd = Command::new(&python_exe);
+    cmd.args(&[
+        script_path.to_string_lossy().to_string(),
+        "--input".to_string(),
+        source_path.to_string_lossy().to_string(),
+        "--output".to_string(),
+        output_dir.to_string_lossy().to_string(),
+        "--target-rate".to_string(),
+        request.target_sample_rate.to_string(),
+    ])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+
+    if request.convert_wav {
+        cmd.arg("--convert-wav");
+    }
+    if request.normalize_loudness {
+        cmd.arg("--normalize-loudness");
+    }
+    if request.hpss_prepass {
+        cmd.arg("--hpss-prepass");
+    }
+
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to start preprocessing: {}", e))?;
+    let stdout = child.stdout.take().ok_or("Failed to capture pre-processor output")?;
+    let reader = BufReader::new(stdout);
+    let stderr = child.stderr.take();
+    let stderr_handle = std::thread::spawn(move || -> String {
+        if let Some(stderr_stream) = stderr {
+            let mut buf = String::new();
+            let mut stderr_reader = BufReader::new(stderr_stream);
+            let _ = stderr_reader.read_to_string(&mut buf);
+            buf
+        } else {
+            String::new()
+        }
+    });
+
+    let _ = window.emit("pre-split-progress", serde_json::json!({
+        "message": "Initializing preprocessing pipeline...",
+        "percent": 5
+    }));
+
+    let mut final_result: Option<PreSplitResult> = None;
+    let mut last_error: Option<String> = None;
+
+    for line in reader.lines() {
+        let line = line.map_err(|e| format!("Failed to read pre-processor output: {}", e))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&line) {
+            match payload.get("event").and_then(|value| value.as_str()) {
+                Some("progress") => {
+                    let percent = payload.get("percent").and_then(|value| value.as_u64()).unwrap_or(0) as u32;
+                    let message = payload.get("message").and_then(|value| value.as_str()).unwrap_or("Processing audio...");
+                    let _ = window.emit("pre-split-progress", serde_json::json!({
+                        "message": message,
+                        "percent": percent
+                    }));
+                }
+                Some("result") => {
+                    let output_path = payload.get("output_path").and_then(|value| value.as_str()).unwrap_or_default().to_string();
+                    let duration = payload.get("duration_seconds").and_then(|value| value.as_f64()).unwrap_or(0.0);
+                    let sample_rate = payload.get("sample_rate").and_then(|value| value.as_u64()).unwrap_or(44100) as u32;
+                    let channels = payload.get("channels").and_then(|value| value.as_u64()).unwrap_or(2) as u32;
+                    
+                    let hpss = payload.get("hpss");
+                    let hpss_harmonic = hpss.and_then(|h| h.get("harmonic")).and_then(|value| value.as_str()).map(|s| s.to_string());
+                    let hpss_percussive = hpss.and_then(|h| h.get("percussive")).and_then(|value| value.as_str()).map(|s| s.to_string());
+
+                    final_result = Some(PreSplitResult {
+                        status: "ok".to_string(),
+                        output_path,
+                        duration_seconds: duration,
+                        sample_rate,
+                        channels,
+                        hpss_harmonic,
+                        hpss_percussive,
+                    });
+                }
+                Some("error") => {
+                    last_error = payload.get("message").and_then(|value| value.as_str()).map(|value| value.to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let status = child.wait().map_err(|e| format!("Failed to await pre-processor: {}", e))?;
+    let stderr_output = stderr_handle.join().unwrap_or_default();
+
+    if !status.success() {
+        return Err(last_error.unwrap_or_else(|| {
+            let details = if stderr_output.trim().is_empty() {
+                "Unknown preprocessing failure".to_string()
+            } else {
+                stderr_output
+            };
+            format!("Audio preprocessing failed: {}", truncate_diagnostic_details(&details))
+        }));
+    }
+
+    let result = final_result.ok_or_else(|| {
+        if let Some(error) = last_error {
+            error
+        } else {
+            "Preprocessing finished without returning a result payload.".to_string()
+        }
+    })?;
+
+    let _ = window.emit("pre-split-progress", serde_json::json!({
+        "message": "Preprocessing complete.",
+        "percent": 100
+    }));
+
+    Ok(result)
+}
+
+#[tauri::command]
+async fn download_youtube_audio(
+    request: YouTubeDownloadRequest,
+    window: tauri::Window,
+) -> Result<YouTubeDownloadResult, String> {
+    let python_exe = get_python_executable().ok_or_else(|| {
+        "Python runtime is not available. Run the built-in environment setup first.".to_string()
+    })?;
+    let env_dir = get_python_env_dir();
+    let script_path = resolve_python_script_path("youtube_dl.py");
+    if !script_path.exists() {
+        return Err(format!("youtube_dl.py not found at {}", script_path.display()));
+    }
+
+    if !detect_missing_python_modules(&python_exe, &["yt_dlp"]).is_empty() {
+        let _ = window.emit("youtube-download-progress", serde_json::json!({
+            "message": "Installing YouTube import runtime...",
+            "percent": 4
+        }));
+        install_python_packages(&python_exe, &env_dir, "Install yt-dlp", &["yt-dlp"])?;
+    }
+
+    let output_dir = get_local_feature_data_dir("imports")?;
+    let mut cmd = Command::new(&python_exe);
+    cmd.args(&[
+        script_path.to_string_lossy().to_string(),
+        "--url".to_string(),
+        request.url.clone(),
+        "--output".to_string(),
+        output_dir.to_string_lossy().to_string(),
+        "--mode".to_string(),
+        request.mode.clone(),
+    ])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to start YouTube import: {}", e))?;
+    let stdout = child.stdout.take().ok_or("Failed to capture YouTube downloader output")?;
+    let reader = BufReader::new(stdout);
+    let stderr = child.stderr.take();
+    let stderr_handle = std::thread::spawn(move || -> String {
+        if let Some(stderr_stream) = stderr {
+            let mut buf = String::new();
+            let mut stderr_reader = BufReader::new(stderr_stream);
+            let _ = stderr_reader.read_to_string(&mut buf);
+            buf
+        } else {
+            String::new()
+        }
+    });
+
+    let _ = window.emit("youtube-download-progress", serde_json::json!({
+        "message": "Booting import pipeline...",
+        "percent": 2
+    }));
+
+    let mut final_result: Option<YouTubeDownloadResult> = None;
+    let mut last_error: Option<String> = None;
+
+    for line in reader.lines() {
+        let line = line.map_err(|e| format!("Failed to read YouTube download output: {}", e))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&line) {
+            match payload.get("event").and_then(|value| value.as_str()) {
+                Some("progress") => {
+                    let percent = payload.get("percent").and_then(|value| value.as_u64()).unwrap_or(0) as u32;
+                    let message = payload.get("message").and_then(|value| value.as_str()).unwrap_or("Downloading audio...");
+                    let _ = window.emit("youtube-download-progress", serde_json::json!({
+                        "message": message,
+                        "percent": percent
+                    }));
+                }
+                Some("result") => {
+                    let formats_available: Vec<String> = payload.get("formats_available")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| arr.iter().filter_map(|v| v.as_str()).map(String::from).collect())
+                        .unwrap_or_default();
+                    
+                    final_result = Some(YouTubeDownloadResult {
+                        status: "ok".to_string(),
+                        file_path: payload.get("file").and_then(|value| value.as_str()).unwrap_or_default().to_string(),
+                        title: payload.get("title").and_then(|value| value.as_str()).unwrap_or("Untitled Import").to_string(),
+                        duration_seconds: payload.get("duration").and_then(|value| value.as_f64()).unwrap_or(0.0),
+                        output_directory: output_dir.to_string_lossy().to_string(),
+                        uploader: payload.get("uploader").and_then(|value| value.as_str()).map(|value| value.to_string()),
+                        webpage_url: payload.get("webpage_url").and_then(|value| value.as_str()).map(|value| value.to_string()),
+                        mode_used: payload.get("mode_used").and_then(|value| value.as_str()).unwrap_or("audio_mp3_320").to_string(),
+                        formats_available,
+                    });
+                }
+                Some("error") => {
+                    last_error = payload.get("message").and_then(|value| value.as_str()).map(|value| value.to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let status = child.wait().map_err(|e| format!("Failed to await YouTube downloader: {}", e))?;
+    let stderr_output = stderr_handle.join().unwrap_or_default();
+
+    if !status.success() {
+        return Err(last_error.unwrap_or_else(|| {
+            let details = if stderr_output.trim().is_empty() {
+                "Unknown YouTube import failure".to_string()
+            } else {
+                stderr_output
+            };
+            format!("YouTube import failed: {}", truncate_diagnostic_details(&details))
+        }));
+    }
+
+    let result = final_result.ok_or_else(|| {
+        if let Some(error) = last_error {
+            error
+        } else {
+            "YouTube import finished without returning a result payload.".to_string()
+        }
+    })?;
+
+    let _ = window.emit("youtube-download-progress", serde_json::json!({
+        "message": "Audio imported successfully.",
+        "percent": 100
+    }));
+
+    Ok(result)
+}
+
+#[tauri::command]
+async fn transcribe_audio(
+    request: WhisperTranscriptionRequest,
+    window: tauri::Window,
+) -> Result<WhisperTranscriptionResult, String> {
+    let source_path = PathBuf::from(&request.input_path);
+    if !source_path.exists() {
+        return Err(format!("Audio file not found: {}", source_path.display()));
+    }
+
+    let python_exe = get_python_executable().ok_or_else(|| {
+        "Python runtime is not available. Run the built-in environment setup first.".to_string()
+    })?;
+    let env_dir = get_python_env_dir();
+    let script_path = resolve_python_script_path("whisper_transcribe.py");
+    if !script_path.exists() {
+        return Err(format!("whisper_transcribe.py not found at {}", script_path.display()));
+    }
+
+    if !detect_missing_python_modules(&python_exe, &["whisper"]).is_empty() {
+        let _ = window.emit("whisper-progress", serde_json::json!({
+            "message": "Installing Whisper transcription runtime...",
+            "percent": 4
+        }));
+        install_python_packages(&python_exe, &env_dir, "Install openai-whisper", &["openai-whisper"])?;
+    }
+
+    let output_dir = get_transcript_output_dir(&source_path)?;
+    let preset = request.preset.unwrap_or_else(|| "clean_speech".to_string());
+    let model = request.model.unwrap_or_else(|| "auto".to_string());
+    let language = request.language.unwrap_or_default();
+    let task = request.task.unwrap_or_else(|| "transcribe".to_string());
+    let content_type = request.content_type.clone();
+
+    let mut cmd = Command::new(&python_exe);
+    cmd.args(&[
+        script_path.to_string_lossy().to_string(),
+        "--input".to_string(),
+        source_path.to_string_lossy().to_string(),
+        "--output".to_string(),
+        output_dir.to_string_lossy().to_string(),
+        "--preset".to_string(),
+        preset.clone(),
+        "--model".to_string(),
+        model.clone(),
+        "--task".to_string(),
+        task.clone(),
+        "--language".to_string(),
+        language.clone(),
+        "--content-type".to_string(),
+        content_type.clone(),
+    ])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to start Whisper transcription: {}", e))?;
+    let stdout = child.stdout.take().ok_or("Failed to capture Whisper output")?;
+    let reader = BufReader::new(stdout);
+    let stderr = child.stderr.take();
+    let stderr_handle = std::thread::spawn(move || -> String {
+        if let Some(stderr_stream) = stderr {
+            let mut buf = String::new();
+            let mut stderr_reader = BufReader::new(stderr_stream);
+            let _ = stderr_reader.read_to_string(&mut buf);
+            buf
+        } else {
+            String::new()
+        }
+    });
+
+    let _ = window.emit("whisper-progress", serde_json::json!({
+        "message": "Booting Whisper pipeline...",
+        "percent": 2
+    }));
+
+    let mut final_result: Option<WhisperTranscriptionResult> = None;
+    let mut last_error: Option<String> = None;
+
+    for line in reader.lines() {
+        let line = line.map_err(|e| format!("Failed to read Whisper output: {}", e))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&line) {
+            match payload.get("event").and_then(|value| value.as_str()) {
+                Some("progress") => {
+                    let percent = payload.get("percent").and_then(|value| value.as_u64()).unwrap_or(0) as u32;
+                    let message = payload.get("message").and_then(|value| value.as_str()).unwrap_or("Transcribing audio...");
+                    let _ = window.emit("whisper-progress", serde_json::json!({
+                        "message": message,
+                        "percent": percent
+                    }));
+                }
+                Some("result") => {
+                    final_result = Some(WhisperTranscriptionResult {
+                        status: "ok".to_string(),
+                        text_file: payload.get("textFile").and_then(|value| value.as_str()).unwrap_or_default().to_string(),
+                        json_file: payload.get("jsonFile").and_then(|value| value.as_str()).unwrap_or_default().to_string(),
+                        srt_file: payload.get("srtFile").and_then(|value| value.as_str()).unwrap_or_default().to_string(),
+                        vtt_file: payload.get("vttFile").and_then(|value| value.as_str()).unwrap_or_default().to_string(),
+                        word_srt_file: payload.get("wordSrtFile").and_then(|value| value.as_str()).map(|value| value.to_string()),
+                        output_directory: output_dir.to_string_lossy().to_string(),
+                        model: payload.get("model").and_then(|value| value.as_str()).unwrap_or(&model).to_string(),
+                        preset: payload.get("preset").and_then(|value| value.as_str()).unwrap_or(&preset).to_string(),
+                        task: payload.get("task").and_then(|value| value.as_str()).unwrap_or(&task).to_string(),
+                        content_type: payload.get("contentType").and_then(|value| value.as_str()).unwrap_or("default").to_string(),
+                        transcript_preview: payload.get("transcriptPreview").and_then(|value| value.as_str()).unwrap_or_default().to_string(),
+                        segment_count: payload.get("segmentCount").and_then(|value| value.as_u64()).unwrap_or(0) as usize,
+                        detected_language: payload.get("detectedLanguage").and_then(|value| value.as_str()).map(|value| value.to_string()),
+                    });
+                }
+                Some("error") => {
+                    last_error = payload.get("message").and_then(|value| value.as_str()).map(|value| value.to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let status = child.wait().map_err(|e| format!("Failed to await Whisper transcription: {}", e))?;
+    let stderr_output = stderr_handle.join().unwrap_or_default();
+
+    if !status.success() {
+        return Err(last_error.unwrap_or_else(|| {
+            let details = if stderr_output.trim().is_empty() {
+                "Unknown Whisper transcription failure".to_string()
+            } else {
+                stderr_output
+            };
+            format!("Whisper transcription failed: {}", truncate_diagnostic_details(&details))
+        }));
+    }
+
+    let result = final_result.ok_or_else(|| {
+        if let Some(error) = last_error {
+            error
+        } else {
+            "Whisper transcription finished without returning a result payload.".to_string()
+        }
+    })?;
+
+    let _ = window.emit("whisper-progress", serde_json::json!({
+        "message": "Transcript ready.",
+        "percent": 100
+    }));
+
+    Ok(result)
+}
+
+#[tauri::command]
 fn cancel_stem_split() -> Result<String, String> {
     let mut state = OPERATION_STATE.lock().unwrap();
     if let Some(pid) = state.process_id {
@@ -2709,7 +3282,7 @@ pub struct PythonStatus {
 }
 
 const REQUIRED_PYTHON_PACKAGES: [&str; 5] = ["torch", "demucs", "librosa", "soundfile", "numpy"];
-const OPTIONAL_PYTHON_PACKAGES: [&str; 6] = ["pedalboard", "pydub", "psutil", "pynvml", "sounddevice", "pyloudnorm"];
+const OPTIONAL_PYTHON_PACKAGES: [&str; 8] = ["pedalboard", "pydub", "psutil", "pynvml", "sounddevice", "pyloudnorm", "yt_dlp", "whisper"];
 const STABLE_TORCH_VERSION: &str = "2.5.1";
 const STABLE_DEMUCS_VERSION: &str = "4.0.1";
 
@@ -3012,6 +3585,34 @@ fn run_best_effort_python_step(
     if let Err(error) = run_python_step(python_exe, env_dir, label, args, diagnostics) {
         diagnostics.warnings.push(error);
         save_python_setup_diagnostics(diagnostics);
+    }
+}
+
+fn install_python_packages(
+    python_exe: &Path,
+    env_dir: &Path,
+    label: &str,
+    packages: &[&str],
+) -> Result<(), String> {
+    let mut args = vec![
+        "-m".to_string(),
+        "pip".to_string(),
+        "install".to_string(),
+    ];
+    args.extend(packages.iter().map(|pkg| pkg.to_string()));
+    args.extend([
+        "--no-warn-script-location".to_string(),
+        "--no-cache-dir".to_string(),
+    ]);
+
+    let output = run_python_command_capture(python_exe, &args, Some(env_dir))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let details = if !stderr.is_empty() { stderr } else { stdout };
+        Err(format!("{} failed: {}", label, truncate_diagnostic_details(&details)))
     }
 }
 
@@ -3398,6 +3999,8 @@ async fn setup_python_environment(window: tauri::Window) -> Result<String, Strin
                 "sounddevice".into(),
                 "pyloudnorm".into(),
                 "audio-separator[cpu]".into(),
+                "yt-dlp".into(),
+                "openai-whisper".into(),
                 "--no-warn-script-location".into(),
                 "--no-cache-dir".into(),
             ],
@@ -3479,7 +4082,7 @@ async fn setup_python_environment(window: tauri::Window) -> Result<String, Strin
         
         emit_progress("Installing audio libraries...", 75);
         let mut cmd = Command::new(&pip_path);
-        cmd.args(&["install", "librosa", "soundfile", "pedalboard", "pydub", "numpy", "resampy", "tqdm", "psutil", "pyloudnorm", "sounddevice"]);
+        cmd.args(&["install", "librosa", "soundfile", "pedalboard", "pydub", "numpy", "resampy", "tqdm", "psutil", "pyloudnorm", "sounddevice", "yt-dlp", "openai-whisper"]);
         let result = cmd.output().map_err(|e| format!("Failed to install packages: {}", e))?;
         if !result.status.success() {
             return Err(format!("Package installation failed: {}", String::from_utf8_lossy(&result.stderr)));
@@ -3644,7 +4247,7 @@ fn extract_zip(zip_path: &std::path::Path, dest_dir: &std::path::Path) -> Result
 fn health_check() -> Result<String, String> {
     Ok(serde_json::json!({
         "status": "healthy",
-        "version": "0.1.0",
+        "version": "0.4.0",
         "python_available": check_python_available(),
     }).to_string())
 }
@@ -3675,6 +4278,9 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             execute_splice,
+            preprocess_audio_for_split,
+            download_youtube_audio,
+            transcribe_audio,
             cancel_stem_split,
             get_separator_status,
             health_check,

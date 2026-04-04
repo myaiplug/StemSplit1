@@ -14,3 +14,5 @@ psutil
 sounddevice
 pyloudnorm
 audio-separator[cpu]
+yt-dlp
+openai-whisper
