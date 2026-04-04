@@ -1,8 +1,8 @@
 'use client';
 // src/components/TitleBar.tsx
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { appWindow } from '@tauri-apps/api/window';
-import { message } from '@tauri-apps/api/dialog';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { message } from '@tauri-apps/plugin-dialog';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLicense } from '@/contexts/LicenseContext';
 
@@ -249,7 +249,7 @@ const TitleBar: React.FC<TitleBarProps> = ({ onToolTrigger }) => {
                 <div className="flex items-center gap-0 pr-0 h-full">
                     {/* Minimize Button */}
                     <div 
-                        onClick={() => appWindow.minimize()}
+                        onClick={() => getCurrentWindow().minimize()}
                         className="w-10 h-10 flex items-center justify-center cursor-pointer hover:bg-cyan-900/20 transition-colors"
                     >
                         <motion.div 
@@ -264,7 +264,7 @@ const TitleBar: React.FC<TitleBarProps> = ({ onToolTrigger }) => {
 
                     {/* Close Button X */}
                     <div
-                        onClick={() => appWindow.close()}
+                        onClick={() => getCurrentWindow().close()}
                         className="w-10 h-10 flex items-center justify-center cursor-pointer hover:bg-red-900/20 transition-colors"
                     >
                         <div className="relative w-4 h-4 flex items-center justify-center">

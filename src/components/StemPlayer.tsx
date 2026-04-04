@@ -3,7 +3,7 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { convertFileSrc } from '@tauri-apps/api/tauri';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import WaveSurfer from 'wavesurfer.js';
 import StemFXMenu from './StemFXMenu';
 
@@ -223,7 +223,7 @@ const StemPlayer: React.FC<StemPlayerProps> = ({ stemName, filePath, duration, p
             const isTauri = typeof window !== 'undefined' && '__TAURI__' in window;
             if (isTauri) {
                 // Open the file with system default or copy to downloads
-                const { invoke } = await import('@tauri-apps/api/tauri');
+                const { invoke } = await import('@tauri-apps/api/core');
                 await invoke('open_results_folder', { path: filePath.replace(/[/\\][^/\\]+$/, '') });
             }
         } catch (err) {

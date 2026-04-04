@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
-import { open } from '@tauri-apps/api/shell';
+import { open } from '@tauri-apps/plugin-shell';
 
 interface UpdateInfo {
   version: string;

@@ -5,7 +5,7 @@ import { motion, AnimatePresence, useAnimation } from 'framer-motion';
 import { useStemSplit, StemSplitStatus } from '@/hooks/useStemSplit';
 import { openResultsFolder } from '@/lib/tauri-bridge';
 import { useLicense } from '@/contexts/LicenseContext';
-import { open as dialogOpen } from '@tauri-apps/api/dialog';
+import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
 import TitleBar from './TitleBar';
 import StemPlayer from './StemPlayer';
 import OriginalPlayer from './OriginalPlayer';
