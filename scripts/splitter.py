@@ -673,7 +673,7 @@ class AudioSeparator:
 
     def _validate_input_file(self, file_path: str) -> Tuple[bool, str]:
         """
-        Validate input audio file.
+        Validate input audio file by reading metadata only (fast, no full load).
 
         Args:
             file_path: Path to audio file
@@ -690,9 +690,10 @@ class AudioSeparator:
             return False, f"Unsupported format: {path.suffix}. Supported: {self.SUPPORTED_FORMATS}"
 
         try:
-            # Quick validation by reading metadata
-            y, sr = librosa.load(file_path, sr=None, mono=False)
-            duration = librosa.get_duration(y=y, sr=sr)
+            # Fast validation: read only file metadata, NOT entire audio data
+            info = sf.info(file_path)
+            duration = info.duration
+            sr = info.samplerate
             logger.info(f" Input file valid: {path.name} ({duration:.2f}s)")
             return True, f"Valid audio file ({duration:.2f}s, {sr}Hz)"
         except Exception as e:
@@ -1048,24 +1049,35 @@ class AudioSeparator:
         try:
             from audio_separator.separator import Separator
             import tempfile
-            
-            # Setup Roformer Separator
-            separator = Separator()
+            import platform
+
+            # Use a platform-safe, persistent model cache directory
+            if platform.system() == 'Windows':
+                model_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'audio-separator', 'models')
+            else:
+                model_dir = os.path.join(os.path.expanduser('~'), '.cache', 'audio-separator', 'models')
+            os.makedirs(model_dir, exist_ok=True)
             
             # We determine model based on stem count
             if self.stems_count == 4:
-                # 4-stem model (e.g. BS-Roformer or similar multi-stem model)
+                # 4-stem BS-Roformer model
                 model_name = 'model_bs_roformer_ep_317_sdr_12.9755.ckpt'
             else:
-                # Default to 2-stem high quality vocal isolation (MelBand Roformer)
+                # 2-stem high-quality vocal isolation (MelBand Roformer)
                 model_name = 'mel_band_roformer_kim_ft_erika.ckpt'
-                
-            logger.info(f"Loading Roformer model: {model_name}")
-            separator.load_model(model_filename=model_name)
-            
+
+            logger.info(f"Loading Roformer model: {model_name} from {model_dir}")
+
             temp_dir = tempfile.mkdtemp(prefix="stemsplit_roformer_")
-            separator.output_dir = temp_dir
-            separator.output_format = 'wav'
+
+            # Setup Roformer Separator with explicit model dir and temp output
+            separator = Separator(
+                model_file_dir=model_dir,
+                output_dir=temp_dir,
+                output_format='wav',
+                log_level=logging.WARNING,
+            )
+            separator.load_model(model_filename=model_name)
             
             # Run separation
             logger.info("Running Roformer inference...")
@@ -1074,8 +1086,7 @@ class AudioSeparator:
             stems_data = {}
             for file_name in output_files:
                 file_path = os.path.join(temp_dir, file_name)
-                # Parse stem name from output. audio-separator usually appends `_(Vocals)` 
-                # or similarly to the filename, dependent on the model.
+                # Parse stem name from output. audio-separator appends `_(Vocals)` etc.
                 file_lower = file_name.lower()
                 
                 stem_key = 'other'
@@ -1087,14 +1098,11 @@ class AudioSeparator:
                     stem_key = 'bass'
                 elif 'drum' in file_lower:
                     stem_key = 'drums'
-                else:
-                    # Generic fallback matching mechanism
-                    pass
                 
                 logger.info(f"Reading back generated Roformer stem {stem_key} from {file_name}")
                 stem_audio, stem_sr = librosa.load(file_path, sr=sr, mono=False)
                 
-                # Transpose if mono model output to shape expected: (channels, samples)
+                # Ensure stereo shape: (channels, samples)
                 if stem_audio.ndim == 1:
                     stem_audio = np.vstack([stem_audio, stem_audio])
                 
@@ -1103,7 +1111,6 @@ class AudioSeparator:
             return stems_data
             
         except ImportError:
-            # Fallback wrapper notice
             logger.error("Roformer engine requires 'audio-separator'. Please run: pip install audio-separator[cpu]")
             raise RuntimeError("Roformer not properly installed. Try Demucs.")
         except Exception as e:
@@ -1501,32 +1508,48 @@ class AudioSeparator:
 
             # Step 3: Perform separation
             if progress_hook:
-                progress_hook(3, 5, "Step 3/5: Performing stem separation...", 40)
+                device_notice = " (CPU mode - may take 10-30 minutes)" if self.device == 'cpu' else ""
+                progress_hook(3, 5, f"Step 3/5: Performing stem separation{device_notice}...", 40)
                 
             # Run background progress updater since Demucs is slow
             import threading
             stop_progress = threading.Event()
+            is_cpu = self.device == 'cpu'
             def update_progress():
                 import time
                 current = 40
                 while not stop_progress.is_set() and current < 90:
                     # Slow down as we approach 90 — asymptotic feel
-                    if current < 60:
-                        delay = 2.0
-                    elif current < 80:
-                        delay = 4.0
-                    elif current < 88:
-                        delay = 8.0
+                    # CPU takes much longer - adjust delays
+                    if is_cpu:
+                        if current < 50:
+                            delay = 8.0  # CPU is ~5x slower
+                        elif current < 70:
+                            delay = 15.0
+                        elif current < 85:
+                            delay = 25.0
+                        else:
+                            delay = 45.0
                     else:
-                        delay = 15.0 # Very slow creep for long files
+                        if current < 60:
+                            delay = 2.0
+                        elif current < 80:
+                            delay = 4.0
+                        elif current < 88:
+                            delay = 8.0
+                        else:
+                            delay = 15.0
                     
                     time.sleep(delay)
                     current += 1
                     
                     if progress_hook and not stop_progress.is_set():
-                        msg = f"Step 3/5: AI model processing ({current}%)..."
-                        if current > 85:
-                             msg = f"Step 3/5: Matrix calculation ({current}%)... Large files on CPU may take 5-10 mins."
+                        if is_cpu:
+                            msg = f"Step 3/5: Processing on CPU ({current}%)... This may take 10-30 mins for long tracks."
+                        else:
+                            msg = f"Step 3/5: AI model processing ({current}%)..."
+                            if current > 85:
+                                msg = f"Step 3/5: Matrix calculation ({current}%)..."
                         
                         progress_hook(3, 5, msg, current)
 
