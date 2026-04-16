@@ -12,7 +12,7 @@
     "billing:test:webhooks": "node ./billing-service/webhook-smoke.mjs"
   },
   "dependencies": {
-    "@react-three/drei": "9.112.0",
+    "@react-three/drei": "10.7.7",
     "@react-three/fiber": "9.6.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
