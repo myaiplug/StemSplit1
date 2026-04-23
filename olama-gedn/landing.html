@@ -1,0 +1,2028 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Temporal Portal — Atmospheric Time Design For Modern Producers</title>
+<meta name="description" content="Five time-stretch engines, four DAW-tuned profiles, and the real Temporal interface embedded on the page. Built for producers shaping texture, motion, and atmosphere.">
+<style>
+/* ─── DESIGN TOKENS ─────────────────────────────────────────── */
+:root {
+  --bg-void:    #020409;
+  --bg-deep:    #050c1a;
+  --bg-mid:     #080f22;
+  --bg-lift:    #0c1430;
+
+  --ink:        #e8eeff;
+  --ink-muted:  rgba(232,238,255,.55);
+  --ink-faint:  rgba(232,238,255,.28);
+
+  --purple:     #c238ff;
+  --purple-hi:  #f06dff;
+  --purple-lo:  rgba(194,56,255,.16);
+  --cyan:       #7aa8ff;
+  --cyan-hi:    #b2caff;
+  --cyan-lo:    rgba(122,168,255,.12);
+  --pink:       #ff4ec7;
+  --pink-lo:    rgba(255,78,199,.13);
+  --amber:      #ffb340;
+
+  --grad-brand: linear-gradient(135deg, var(--pink) 0%, var(--purple) 55%, var(--cyan) 100%);
+  --grad-hero:  linear-gradient(135deg, #ff7ad9 0%, var(--purple) 48%, var(--cyan) 100%);
+  --grad-text:  linear-gradient(100deg, #ff99e7 0%, var(--pink) 30%, var(--purple-hi) 62%, var(--cyan-hi) 100%);
+
+  --stroke:     rgba(160,190,255,.1);
+  --stroke-hi:  rgba(160,190,255,.22);
+  --surface:    rgba(255,255,255,.032);
+  --surface-hi: rgba(255,255,255,.06);
+  --glass:      rgba(8,15,34,.72);
+
+  --r-sm:   10px;
+  --r-md:   16px;
+  --r-lg:   24px;
+  --r-xl:   32px;
+  --r-pill: 999px;
+
+  --shadow-sm: 0 2px 12px rgba(0,0,0,.4);
+  --shadow-md: 0 8px 32px rgba(0,0,0,.5);
+  --shadow-xl: 0 24px 80px rgba(0,0,0,.6);
+  --glow-p:    0 0 60px rgba(124,58,237,.35);
+  --glow-c:    0 0 60px rgba(0,238,255,.25);
+
+  --ease-out:  cubic-bezier(.16,1,.3,1);
+  --ease-in:   cubic-bezier(.7,0,.84,0);
+  --ease-io:   cubic-bezier(.76,0,.24,1);
+  --spring:    cubic-bezier(.34,1.56,.64,1);
+
+  font-size: 16px;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ─── RESET ─────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; color-scheme: dark; }
+body {
+  background: var(--bg-void);
+  color: var(--ink);
+  overflow-x: hidden;
+  line-height: 1.5;
+}
+img, svg { display: block; max-width: 100%; }
+a { color: inherit; text-decoration: none; }
+button, input { font: inherit; }
+
+/* ─── SCROLLBAR ──────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-void); }
+::-webkit-scrollbar-thumb { background: rgba(124,58,237,.45); border-radius: 3px; }
+
+/* ─── SELECTION ──────────────────────────────────────────────── */
+::selection { background: rgba(124,58,237,.35); }
+
+/* ─── CANVAS BACKGROUND ──────────────────────────────────────── */
+#canvas-bg {
+  position: fixed; inset: 0; z-index: 0;
+  pointer-events: none;
+  opacity: .55;
+}
+
+/* ─── NOISE OVERLAY ──────────────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 1;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+  opacity: .028;
+}
+
+/* ─── UTILITY ────────────────────────────────────────────────── */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+.container--wide { max-width: 1400px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+
+.grad-text {
+  background: var(--grad-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.grad-border {
+  position: relative;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+.grad-border::before {
+  content: '';
+  position: absolute; inset: -1px;
+  border-radius: inherit;
+  background: var(--grad-brand);
+  z-index: -1;
+  opacity: .4;
+}
+
+/* ─── REVEAL ANIMATIONS ──────────────────────────────────────── */
+.reveal { opacity: 0; transform: translateY(40px); transition: opacity .8s var(--ease-out), transform .8s var(--ease-out); }
+.reveal.visible { opacity: 1; transform: none; }
+.reveal-left { opacity: 0; transform: translateX(-40px); transition: opacity .8s var(--ease-out), transform .8s var(--ease-out); }
+.reveal-left.visible { opacity: 1; transform: none; }
+.reveal-scale { opacity: 0; transform: scale(.92); transition: opacity .8s var(--ease-out), transform .8s var(--ease-out); }
+.reveal-scale.visible { opacity: 1; transform: none; }
+
+.stagger > * { opacity: 0; transform: translateY(28px); transition: opacity .7s var(--ease-out), transform .7s var(--ease-out); }
+.stagger.visible > *:nth-child(1) { opacity: 1; transform: none; transition-delay: .0s; }
+.stagger.visible > *:nth-child(2) { opacity: 1; transform: none; transition-delay: .1s; }
+.stagger.visible > *:nth-child(3) { opacity: 1; transform: none; transition-delay: .2s; }
+.stagger.visible > *:nth-child(4) { opacity: 1; transform: none; transition-delay: .3s; }
+.stagger.visible > *:nth-child(5) { opacity: 1; transform: none; transition-delay: .4s; }
+.stagger.visible > *:nth-child(6) { opacity: 1; transform: none; transition-delay: .5s; }
+
+/* ─── ORB BLOBS ──────────────────────────────────────────────── */
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  pointer-events: none;
+  animation: orb-drift 20s ease-in-out infinite;
+}
+@keyframes orb-drift {
+  0%,100% { transform: translate(0,0) scale(1); }
+  33%      { transform: translate(30px,-20px) scale(1.08); }
+  66%      { transform: translate(-20px,30px) scale(.95); }
+}
+
+/* ─── CURSOR DOT ─────────────────────────────────────────────── */
+#cursor-dot, #cursor-ring {
+  position: fixed;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 9999;
+  transform: translate(-50%, -50%);
+  transition-property: width, height, opacity, background;
+}
+#cursor-dot  { width: 6px; height: 6px; background: var(--cyan); transition-duration: .1s; }
+#cursor-ring { width: 36px; height: 36px; border: 1px solid rgba(0,238,255,.5); transition-duration: .12s; background: transparent; }
+
+/* ─── NAV ────────────────────────────────────────────────────── */
+.nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  padding: 0 24px;
+  transition: background .3s, box-shadow .3s;
+}
+.nav.scrolled {
+  background: rgba(2,4,9,.75);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 1px 0 var(--stroke);
+}
+.nav__inner {
+  max-width: 1200px; margin: 0 auto;
+  display: flex; align-items: center; justify-content: space-between;
+  height: 72px; gap: 16px;
+}
+.nav__brand {
+  display: flex; align-items: center; gap: 12px;
+  font-weight: 700; font-size: 1.1rem; letter-spacing: -.4px;
+  flex-shrink: 0;
+}
+.nav__logo {
+  width: 38px; height: 38px; border-radius: 10px;
+  background: var(--grad-brand);
+  display: flex; align-items: center; justify-content: center;
+  font-size: .8rem; font-weight: 900; color: #030a18; letter-spacing: .5px;
+  box-shadow: var(--glow-p);
+  flex-shrink: 0;
+}
+.nav__links {
+  display: flex; align-items: center; gap: 2px;
+  list-style: none;
+}
+.nav__links a {
+  padding: 7px 14px; border-radius: var(--r-pill);
+  font-size: .92rem; color: var(--ink-muted);
+  transition: color .2s, background .2s;
+}
+.nav__links a:hover { color: var(--ink); background: var(--surface-hi); }
+.nav__actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+/* ─── BUTTONS ────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 24px; border-radius: var(--r-pill);
+  font-size: .93rem; font-weight: 600; letter-spacing: -.1px;
+  border: none; cursor: pointer;
+  transition: transform .2s var(--spring), box-shadow .2s, opacity .2s;
+  position: relative; overflow: hidden;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.btn:hover { transform: translateY(-2px); }
+.btn:active { transform: translateY(0) scale(.97); }
+
+.btn--primary {
+  background: var(--grad-brand);
+  color: #030a18;
+  box-shadow: 0 4px 24px rgba(124,58,237,.4), 0 1px 4px rgba(0,0,0,.3);
+}
+.btn--primary:hover { box-shadow: 0 8px 40px rgba(124,58,237,.6), var(--glow-c); }
+.btn--primary::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,.25), transparent 50%);
+  pointer-events: none;
+}
+
+.btn--ghost {
+  background: var(--surface);
+  border: 1px solid var(--stroke-hi);
+  color: var(--ink-muted);
+}
+.btn--ghost:hover { color: var(--ink); border-color: rgba(160,190,255,.4); background: var(--surface-hi); }
+
+.btn--outline-cyan {
+  background: transparent;
+  border: 1px solid rgba(0,238,255,.3);
+  color: var(--cyan);
+}
+.btn--outline-cyan:hover { background: var(--cyan-lo); border-color: var(--cyan); box-shadow: var(--glow-c); }
+
+.btn--sm { padding: 8px 18px; font-size: .86rem; }
+.btn--lg { padding: 16px 36px; font-size: 1rem; }
+.btn--xl { padding: 20px 48px; font-size: 1.05rem; }
+
+/* ─── BADGE ──────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: var(--r-pill);
+  font-size: .78rem; font-weight: 600; letter-spacing: .5px; text-transform: uppercase;
+  border: 1px solid rgba(0,238,255,.25);
+  background: rgba(0,238,255,.07);
+  color: var(--cyan-hi);
+}
+.badge--purple { border-color: rgba(124,58,237,.3); background: var(--purple-lo); color: var(--purple-hi); }
+.badge--amber  { border-color: rgba(255,179,64,.3);  background: rgba(255,179,64,.08); color: var(--amber); }
+
+/* ─── HERO ───────────────────────────────────────────────────── */
+.hero {
+  position: relative; z-index: 2;
+  min-height: 100svh;
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 120px 24px 80px;
+  overflow: hidden;
+}
+.hero__bg {
+  position: absolute; inset: 0; pointer-events: none; overflow: hidden;
+}
+.hero__bg .orb-1 { width: 700px; height: 700px; top: -200px; left: -150px; background: rgba(124,58,237,.28); animation-delay: -3s; }
+.hero__bg .orb-2 { width: 600px; height: 600px; top: 100px; right: -200px; background: rgba(0,238,255,.18); animation-delay: -8s; }
+.hero__bg .orb-3 { width: 400px; height: 400px; bottom: -100px; left: 30%; background: rgba(224,64,251,.12); animation-delay: -12s; }
+
+.hero__grid {
+  max-width: 1200px; margin: 0 auto; width: 100%;
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 64px; align-items: center;
+}
+.hero__eyebrow { margin-bottom: 24px; }
+.hero__title {
+  font-size: clamp(3rem, 6vw, 5.5rem);
+  line-height: 1.02; letter-spacing: -3px;
+  font-weight: 800;
+  margin-bottom: 28px;
+}
+.hero__subtitle {
+  font-size: clamp(1rem, 1.5vw, 1.2rem);
+  color: var(--ink-muted); line-height: 1.65;
+  max-width: 44ch; margin-bottom: 40px;
+}
+.hero__actions { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-bottom: 48px; }
+.hero__trust {
+  display: flex; align-items: center; gap: 16px;
+  font-size: .82rem; color: var(--ink-faint);
+}
+.hero__trust-avatars { display: flex; }
+.hero__trust-avatars span {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--grad-brand); border: 2px solid var(--bg-void);
+  display: flex; align-items: center; justify-content: center;
+  font-size: .65rem; font-weight: 700; color: #030a18;
+  margin-left: -8px;
+}
+.hero__trust-avatars span:first-child { margin-left: 0; }
+
+/* Hero visual card */
+.hero__visual { position: relative; }
+.hero__card {
+  background: linear-gradient(135deg, rgba(12,20,48,.9), rgba(8,15,34,.95));
+  border: 1px solid var(--stroke-hi);
+  border-radius: var(--r-xl);
+  padding: 32px;
+  box-shadow: var(--shadow-xl), inset 0 1px 0 rgba(255,255,255,.06);
+  position: relative; overflow: hidden;
+  transform-style: preserve-3d;
+  transition: transform .1s;
+}
+.hero__card::before {
+  content: '';
+  position: absolute; inset: 0; border-radius: inherit;
+  background: linear-gradient(135deg, rgba(124,58,237,.12) 0%, transparent 50%, rgba(0,238,255,.08) 100%);
+  pointer-events: none;
+}
+.hero__preview-shell {
+  position: relative;
+  background: linear-gradient(145deg, rgba(18,10,34,.94), rgba(7,8,22,.98));
+  border: 1px solid var(--stroke-hi);
+  border-radius: var(--r-xl);
+  padding: 18px;
+  box-shadow: var(--shadow-xl), 0 0 70px rgba(194,56,255,.16);
+  overflow: hidden;
+}
+.hero__preview-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 14% 10%, rgba(255,78,199,.16), transparent 28%),
+              radial-gradient(circle at 88% 12%, rgba(122,168,255,.15), transparent 24%),
+              linear-gradient(180deg, rgba(255,255,255,.03), transparent 34%);
+  pointer-events: none;
+}
+.hero__preview-topbar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.hero__preview-dots { display: flex; gap: 6px; }
+.hero__preview-dots span { width: 10px; height: 10px; border-radius: 50%; }
+.hero__preview-dots span:nth-child(1) { background: #ff7a7a; }
+.hero__preview-dots span:nth-child(2) { background: #ffc867; }
+.hero__preview-dots span:nth-child(3) { background: #71f29c; }
+.hero__preview-label {
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .9px;
+  text-transform: uppercase;
+  color: var(--pink);
+}
+.hero__preview-frame {
+  position: relative;
+  z-index: 1;
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(0,0,0,.6);
+  aspect-ratio: 16 / 10;
+}
+.hero__preview-viewport {
+  width: 200%;
+  height: 200%;
+  transform: scale(.5);
+  transform-origin: top left;
+}
+.hero__preview-frame iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #080808;
+}
+.hero__preview-overlay {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--r-pill);
+  background: rgba(7,8,22,.76);
+  border: 1px solid rgba(255,255,255,.08);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.hero__preview-overlay strong { color: var(--pink); }
+.hero__preview-meta {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 14px;
+}
+.hero__preview-chip {
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--stroke);
+  background: rgba(255,255,255,.03);
+}
+.hero__preview-chip strong {
+  display: block;
+  font-size: .78rem;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+.hero__preview-chip span {
+  display: block;
+  font-size: .74rem;
+  color: var(--ink-muted);
+  line-height: 1.45;
+}
+.hero__browser-note {
+  margin-top: 16px;
+  font-size: .82rem;
+  color: var(--ink-faint);
+}
+.hero__card-chrome {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 24px;
+}
+.hero__card-dots { display: flex; gap: 6px; }
+.hero__card-dots span {
+  width: 10px; height: 10px; border-radius: 50%;
+}
+.hero__card-dots span:nth-child(1) { background: #ff5f57; }
+.hero__card-dots span:nth-child(2) { background: #febc2e; }
+.hero__card-dots span:nth-child(3) { background: #28c840; }
+.hero__card-tag {
+  font-size: .72rem; font-weight: 600; letter-spacing: .8px;
+  color: var(--ink-faint); text-transform: uppercase;
+}
+
+/* Waveform visualization */
+.waveform {
+  height: 80px; border-radius: 10px;
+  background: rgba(0,0,0,.3);
+  border: 1px solid var(--stroke);
+  display: flex; align-items: center; padding: 0 16px; gap: 2px;
+  margin-bottom: 20px; overflow: hidden;
+}
+.waveform__bar {
+  flex: 1; border-radius: 1px;
+  background: linear-gradient(180deg, var(--cyan), var(--purple));
+  opacity: .7;
+  animation: wave-pulse 1.8s ease-in-out infinite;
+}
+@keyframes wave-pulse {
+  0%,100% { transform: scaleY(1); opacity: .7; }
+  50%      { transform: scaleY(.3); opacity: .4; }
+}
+
+/* Engine knobs */
+.hero__knobs { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 20px; }
+.knob-cell {
+  background: rgba(0,0,0,.3); border: 1px solid var(--stroke);
+  border-radius: var(--r-md); padding: 14px 10px;
+  text-align: center;
+}
+.knob-cell__ring {
+  width: 44px; height: 44px; border-radius: 50%; margin: 0 auto 8px;
+  position: relative;
+  background: conic-gradient(var(--grad-hero) var(--pct, 70%), rgba(255,255,255,.06) 0);
+  display: flex; align-items: center; justify-content: center;
+}
+.knob-cell__ring::after {
+  content: '';
+  width: 30px; height: 30px; border-radius: 50%;
+  background: rgba(8,15,34,.95);
+  border: 1px solid rgba(255,255,255,.05);
+}
+.knob-cell__label { font-size: .68rem; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .5px; }
+.knob-cell__val   { font-size: .82rem; font-weight: 700; color: var(--ink-muted); margin-top: 2px; }
+
+/* Engine selector */
+.hero__engine-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; background: rgba(0,0,0,.3); border: 1px solid var(--stroke);
+  border-radius: var(--r-md);
+}
+.engine-pill {
+  padding: 4px 12px; border-radius: var(--r-pill);
+  font-size: .75rem; font-weight: 600; letter-spacing: .2px;
+  background: var(--purple-lo); color: var(--purple-hi);
+  border: 1px solid rgba(124,58,237,.35);
+  cursor: pointer; transition: all .18s;
+}
+.engine-pill.active { background: var(--purple); color: #fff; box-shadow: 0 0 16px rgba(124,58,237,.5); }
+.engine-pill:hover:not(.active) { background: rgba(124,58,237,.25); }
+
+/* ─── MARQUEE STRIP ──────────────────────────────────────────── */
+.marquee-section {
+  position: relative; z-index: 2;
+  padding: 24px 0;
+  border-top: 1px solid var(--stroke);
+  border-bottom: 1px solid var(--stroke);
+  overflow: hidden;
+  background: rgba(255,255,255,.018);
+}
+.marquee-track {
+  display: flex; gap: 56px; align-items: center;
+  animation: marquee-scroll 28s linear infinite;
+  white-space: nowrap; width: max-content;
+}
+.marquee-track:hover { animation-play-state: paused; }
+@keyframes marquee-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.marquee-item {
+  display: flex; align-items: center; gap: 10px;
+  font-size: .88rem; color: var(--ink-faint); letter-spacing: .2px;
+  flex-shrink: 0;
+}
+.marquee-item svg { opacity: .4; }
+.marquee-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--stroke-hi); flex-shrink: 0; }
+
+/* ─── STATS ──────────────────────────────────────────────────── */
+.stats {
+  position: relative; z-index: 2;
+  padding: 100px 24px;
+}
+.stats__grid {
+  max-width: 1200px; margin: 0 auto;
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  border: 1px solid var(--stroke); border-radius: var(--r-xl);
+  overflow: hidden;
+  background: var(--stroke);
+}
+.stat-card {
+  background: var(--bg-mid); padding: 40px 32px;
+  position: relative; overflow: hidden;
+  transition: background .25s;
+}
+.stat-card:hover { background: var(--bg-lift); }
+.stat-card__num {
+  font-size: clamp(2.4rem, 3.5vw, 3.5rem);
+  font-weight: 800; letter-spacing: -2px;
+  background: var(--grad-text); -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1;
+  margin-bottom: 8px;
+  display: block;
+}
+.stat-card__label { font-size: .9rem; color: var(--ink-muted); }
+.stat-card__sub   { font-size: .78rem; color: var(--ink-faint); margin-top: 4px; }
+.stat-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: var(--grad-brand); opacity: 0;
+  transition: opacity .25s;
+}
+.stat-card:hover::before { opacity: 1; }
+
+/* ─── SECTION HEADER ─────────────────────────────────────────── */
+.section-header { text-align: center; margin-bottom: 64px; }
+.section-header .badge { margin-bottom: 20px; }
+.section-title {
+  font-size: clamp(2rem, 3.5vw, 3rem);
+  font-weight: 800; letter-spacing: -1.5px; line-height: 1.1;
+  margin-bottom: 20px;
+}
+.section-sub {
+  font-size: 1.08rem; color: var(--ink-muted); line-height: 1.65;
+  max-width: 52ch; margin: 0 auto;
+}
+
+/* ─── FEATURES ───────────────────────────────────────────────── */
+.features {
+  position: relative; z-index: 2;
+  padding: 80px 24px 120px;
+}
+.features__bg-blur {
+  position: absolute; top: 20%; left: 50%; transform: translateX(-50%);
+  width: 800px; height: 400px;
+  background: radial-gradient(ellipse, rgba(124,58,237,.1), transparent 70%);
+  pointer-events: none;
+}
+
+/* Bento grid */
+.bento {
+  max-width: 1200px; margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  grid-template-rows: auto;
+  gap: 16px;
+}
+.bento-card {
+  background: linear-gradient(145deg, rgba(12,20,48,.8), rgba(8,15,34,.9));
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-xl);
+  padding: 36px;
+  overflow: hidden; position: relative;
+  transition: border-color .25s, transform .3s var(--ease-out), box-shadow .3s;
+}
+.bento-card:hover {
+  border-color: var(--stroke-hi);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-xl);
+}
+.bento-card::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  opacity: 0; transition: opacity .3s;
+  background: radial-gradient(800px circle at var(--mx,50%) var(--my,50%), rgba(124,58,237,.08), transparent 40%);
+  pointer-events: none;
+}
+.bento-card:hover::before { opacity: 1; }
+
+.bento-card--span3  { grid-column: span 3; }
+.bento-card--span4  { grid-column: span 4; }
+.bento-card--span5  { grid-column: span 5; }
+.bento-card--span6  { grid-column: span 6; }
+.bento-card--span7  { grid-column: span 7; }
+.bento-card--span8  { grid-column: span 8; }
+.bento-card--span12 { grid-column: span 12; }
+
+.bento-card__icon {
+  width: 48px; height: 48px; border-radius: var(--r-md);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.4rem; margin-bottom: 20px;
+  border: 1px solid var(--stroke-hi);
+}
+.bento-card__icon--purple { background: var(--purple-lo); border-color: rgba(124,58,237,.3); }
+.bento-card__icon--cyan   { background: var(--cyan-lo);   border-color: rgba(0,238,255,.25); }
+.bento-card__icon--pink   { background: var(--pink-lo);   border-color: rgba(224,64,251,.25); }
+.bento-card__icon--amber  { background: rgba(255,179,64,.1); border-color: rgba(255,179,64,.3); }
+
+.bento-card h3 { font-size: 1.2rem; font-weight: 700; letter-spacing: -.3px; margin-bottom: 10px; }
+.bento-card p  { font-size: .93rem; color: var(--ink-muted); line-height: 1.6; }
+
+/* Engine cards inline display */
+.engine-list { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
+.engine-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-radius: var(--r-sm);
+  background: rgba(0,0,0,.3); border: 1px solid var(--stroke);
+  transition: border-color .2s, background .2s;
+  cursor: default;
+}
+.engine-row:hover { border-color: var(--stroke-hi); background: var(--surface-hi); }
+.engine-row__dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.engine-row__name { font-size: .85rem; font-weight: 600; flex: 1; }
+.engine-row__desc { font-size: .75rem; color: var(--ink-faint); }
+
+/* Profile pills */
+.profile-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.profile-tag {
+  padding: 6px 14px; border-radius: var(--r-pill);
+  font-size: .78rem; font-weight: 600; letter-spacing: .2px;
+  border: 1px solid var(--stroke-hi);
+  background: var(--surface);
+  color: var(--ink-muted);
+  transition: all .2s;
+}
+.profile-tag:hover { color: var(--ink); border-color: var(--cyan); background: var(--cyan-lo); }
+
+/* Preset preview */
+.preset-preview {
+  background: rgba(0,0,0,.4); border: 1px solid var(--stroke);
+  border-radius: var(--r-md); padding: 16px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: .75rem; color: var(--ink-faint);
+  line-height: 1.8;
+  margin-top: 20px;
+}
+.preset-preview .k { color: var(--cyan-hi); }
+.preset-preview .v { color: var(--purple-hi); }
+.preset-preview .s { color: var(--ink-faint); }
+
+/* Waveform mini */
+.mini-waveform {
+  display: flex; align-items: flex-end; gap: 2px;
+  height: 48px; margin-top: 20px;
+}
+.mini-waveform span {
+  flex: 1; border-radius: 1px;
+  min-height: 4px;
+  animation: mw-pulse 2s ease-in-out infinite;
+}
+@keyframes mw-pulse {
+  0%,100% { opacity: .6; }
+  50%      { opacity: 1; }
+}
+
+/* ─── ENGINES SHOWCASE ───────────────────────────────────────── */
+.engines {
+  position: relative; z-index: 2;
+  padding: 80px 24px 120px;
+  background: linear-gradient(180deg, transparent, rgba(124,58,237,.04), transparent);
+}
+.engines__grid {
+  max-width: 1200px; margin: 0 auto;
+  display: grid; grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+}
+.engine-card {
+  background: linear-gradient(180deg, rgba(12,20,48,.9), rgba(8,15,34,.95));
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-xl); padding: 28px 24px;
+  transition: all .3s var(--ease-out);
+  cursor: pointer; position: relative; overflow: hidden;
+}
+.engine-card::after {
+  content: '';
+  position: absolute; bottom: 0; left: 0; right: 0; height: 2px;
+  background: var(--card-accent, var(--grad-brand));
+  transform: scaleX(0); transform-origin: left;
+  transition: transform .3s var(--ease-out);
+}
+.engine-card:hover::after, .engine-card.active::after { transform: scaleX(1); }
+.engine-card:hover, .engine-card.active {
+  border-color: var(--stroke-hi);
+  transform: translateY(-6px);
+  box-shadow: var(--shadow-xl);
+}
+.engine-card__num {
+  font-size: 2.4rem; font-weight: 800; letter-spacing: -2px;
+  line-height: 1;
+  background: var(--card-grad, var(--grad-text));
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  margin-bottom: 16px;
+}
+.engine-card__name { font-size: 1rem; font-weight: 700; margin-bottom: 8px; }
+.engine-card__desc { font-size: .83rem; color: var(--ink-muted); line-height: 1.55; margin-bottom: 16px; }
+.engine-card__tag  {
+  display: inline-block; padding: 3px 10px; border-radius: var(--r-pill);
+  font-size: .7rem; font-weight: 600; letter-spacing: .3px;
+  border: 1px solid; margin-top: 4px;
+}
+
+/* ─── HOW IT WORKS ───────────────────────────────────────────── */
+.how { position: relative; z-index: 2; padding: 80px 24px 120px; }
+.how__timeline {
+  max-width: 900px; margin: 0 auto;
+  display: flex; flex-direction: column; gap: 0;
+}
+.how__step {
+  display: grid; grid-template-columns: 80px 1fr;
+  gap: 32px; align-items: flex-start;
+  padding: 32px 0;
+  border-bottom: 1px solid var(--stroke);
+  position: relative;
+}
+.how__step:last-child { border-bottom: none; }
+.how__num {
+  width: 56px; height: 56px; border-radius: 50%;
+  border: 1px solid var(--stroke-hi);
+  background: var(--bg-mid);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.2rem; font-weight: 800; letter-spacing: -1px;
+  background: var(--grad-text);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  flex-shrink: 0;
+  position: relative;
+}
+.how__num-wrap {
+  display: flex; flex-direction: column; align-items: center; gap: 0;
+  flex-shrink: 0;
+}
+.how__line {
+  width: 1px; flex: 1; min-height: 60px;
+  background: linear-gradient(180deg, var(--stroke-hi), transparent);
+  margin-top: 8px;
+}
+.how__step:last-child .how__line { display: none; }
+.how__content h3 { font-size: 1.3rem; font-weight: 700; letter-spacing: -.3px; margin-bottom: 10px; }
+.how__content p  { color: var(--ink-muted); line-height: 1.65; }
+.how__content .badge { margin-top: 12px; }
+
+/* ─── COMPARISON ─────────────────────────────────────────────── */
+.comparison { position: relative; z-index: 2; padding: 80px 24px 120px; }
+.comparison__table {
+  max-width: 900px; margin: 0 auto;
+  border: 1px solid var(--stroke); border-radius: var(--r-xl); overflow: hidden;
+}
+.comparison__row {
+  display: grid; grid-template-columns: 1.5fr repeat(3, 1fr);
+  border-bottom: 1px solid var(--stroke);
+  transition: background .2s;
+}
+.comparison__row:last-child { border-bottom: none; }
+.comparison__row:hover:not(.comparison__row--head) { background: var(--surface); }
+.comparison__row--head {
+  background: rgba(124,58,237,.06);
+  border-bottom-color: var(--stroke-hi);
+}
+.comparison__cell {
+  padding: 20px 24px; font-size: .9rem;
+  display: flex; align-items: center; gap: 8px;
+  border-right: 1px solid var(--stroke);
+}
+.comparison__cell:last-child { border-right: none; }
+.comparison__cell--feature { font-weight: 500; color: var(--ink-muted); }
+.comparison__cell--head { font-weight: 700; font-size: .85rem; letter-spacing: -.1px; }
+.comparison__cell--highlight { background: rgba(124,58,237,.04); }
+.check { color: var(--cyan); font-size: 1rem; }
+.cross { color: rgba(255,255,255,.2); font-size: 1rem; }
+.partial { color: var(--amber); font-size: .85rem; }
+
+/* ─── TESTIMONIALS ───────────────────────────────────────────── */
+.testimonials { position: relative; z-index: 2; padding: 80px 24px 120px; }
+.testi__grid {
+  max-width: 1200px; margin: 0 auto;
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+.testi-card {
+  background: linear-gradient(145deg, rgba(12,20,48,.8), rgba(8,15,34,.9));
+  border: 1px solid var(--stroke); border-radius: var(--r-xl);
+  padding: 32px;
+  transition: border-color .25s, transform .3s var(--ease-out), box-shadow .3s;
+  position: relative; overflow: hidden;
+}
+.testi-card:hover { border-color: var(--stroke-hi); transform: translateY(-4px); box-shadow: var(--shadow-xl); }
+.testi-card::before {
+  content: '\201C';
+  position: absolute; top: 16px; right: 24px;
+  font-size: 6rem; line-height: 1; color: rgba(124,58,237,.1);
+  font-family: Georgia, serif; pointer-events: none;
+}
+.testi-card__stars { display: flex; gap: 3px; margin-bottom: 16px; }
+.testi-card__star  { color: var(--amber); font-size: 1rem; }
+.testi-card__text  { font-size: .95rem; color: var(--ink-muted); line-height: 1.7; margin-bottom: 24px; }
+.testi-card__author { display: flex; align-items: center; gap: 12px; }
+.testi-card__avatar {
+  width: 40px; height: 40px; border-radius: 50%;
+  background: var(--grad-brand); border: 2px solid var(--stroke-hi);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: .9rem; color: #030a18; flex-shrink: 0;
+}
+.testi-card__name { font-weight: 700; font-size: .9rem; }
+.testi-card__role { font-size: .78rem; color: var(--ink-faint); }
+
+/* ─── PRICING ────────────────────────────────────────────────── */
+.pricing { position: relative; z-index: 2; padding: 80px 24px 120px; }
+.pricing__grid {
+  max-width: 1100px; margin: 0 auto;
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 20px; align-items: start;
+}
+.price-card {
+  border-radius: var(--r-xl); padding: 36px;
+  border: 1px solid var(--stroke);
+  background: linear-gradient(145deg, rgba(12,20,48,.8), rgba(8,15,34,.9));
+  transition: all .3s var(--ease-out); position: relative; overflow: hidden;
+}
+.price-card:hover { border-color: var(--stroke-hi); transform: translateY(-4px); box-shadow: var(--shadow-xl); }
+.price-card--featured {
+  border-color: rgba(124,58,237,.45);
+  background: linear-gradient(145deg, rgba(20,12,50,.9), rgba(12,20,48,.95));
+  transform: scale(1.04);
+  box-shadow: var(--glow-p), var(--shadow-xl);
+}
+.price-card--featured:hover { transform: scale(1.04) translateY(-4px); }
+.price-card--featured::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  background: linear-gradient(135deg, rgba(124,58,237,.06), transparent);
+  pointer-events: none;
+}
+.price-card__badge {
+  position: absolute; top: -1px; left: 50%; transform: translateX(-50%);
+  padding: 5px 18px; border-radius: 0 0 12px 12px;
+  background: var(--grad-brand); font-size: .72rem; font-weight: 700;
+  color: #030a18; letter-spacing: .4px; text-transform: uppercase;
+  white-space: nowrap;
+}
+.price-card__name { font-size: .85rem; font-weight: 600; color: var(--ink-faint); letter-spacing: .5px; text-transform: uppercase; margin-bottom: 16px; }
+.price-card__num {
+  font-size: clamp(2.5rem, 4vw, 3.2rem); font-weight: 800; letter-spacing: -2px; line-height: 1;
+  margin-bottom: 4px;
+}
+.price-card__period { font-size: .85rem; color: var(--ink-faint); margin-bottom: 24px; }
+.price-card__divider { height: 1px; background: var(--stroke); margin: 24px 0; }
+.price-card__features { display: flex; flex-direction: column; gap: 12px; margin-bottom: 32px; }
+.price-feat {
+  display: flex; align-items: flex-start; gap: 10px;
+  font-size: .9rem; color: var(--ink-muted);
+}
+.price-feat__check { color: var(--cyan); font-size: .95rem; flex-shrink: 0; margin-top: 1px; }
+.price-feat--dim { opacity: .4; }
+
+/* ─── CTA FINAL ──────────────────────────────────────────────── */
+.cta-final {
+  position: relative; z-index: 2;
+  padding: 120px 24px;
+  overflow: hidden;
+}
+.cta-final__bg {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 50%, rgba(124,58,237,.22), transparent 70%),
+    radial-gradient(ellipse 40% 40% at 80% 20%, rgba(0,238,255,.12), transparent 60%),
+    linear-gradient(180deg, transparent, rgba(124,58,237,.06), transparent);
+  pointer-events: none;
+}
+.cta-final__border {
+  position: absolute; inset: 0;
+  border-top: 1px solid var(--stroke);
+  border-bottom: 1px solid var(--stroke);
+  pointer-events: none;
+}
+.cta-final__content { text-align: center; max-width: 700px; margin: 0 auto; position: relative; }
+.cta-final__title {
+  font-size: clamp(2.5rem, 5vw, 4.5rem);
+  font-weight: 800; letter-spacing: -2.5px; line-height: 1.05;
+  margin-bottom: 24px;
+}
+.cta-final__sub { font-size: 1.1rem; color: var(--ink-muted); line-height: 1.65; margin-bottom: 40px; }
+.cta-final__actions { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; margin-bottom: 24px; }
+.cta-final__fine { font-size: .8rem; color: var(--ink-faint); }
+
+/* ─── FOOTER ─────────────────────────────────────────────────── */
+.footer {
+  position: relative; z-index: 2;
+  padding: 60px 24px 40px;
+  border-top: 1px solid var(--stroke);
+}
+.footer__grid {
+  max-width: 1200px; margin: 0 auto;
+  display: grid; grid-template-columns: 2fr repeat(3, 1fr);
+  gap: 48px; margin-bottom: 48px;
+}
+.footer__brand p { font-size: .88rem; color: var(--ink-faint); line-height: 1.65; margin-top: 12px; max-width: 30ch; }
+.footer__col h4 { font-size: .82rem; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 16px; }
+.footer__links { display: flex; flex-direction: column; gap: 10px; }
+.footer__links a { font-size: .88rem; color: var(--ink-faint); transition: color .2s; }
+.footer__links a:hover { color: var(--ink); }
+.footer__bottom {
+  max-width: 1200px; margin: 0 auto;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+  padding-top: 32px; border-top: 1px solid var(--stroke);
+  font-size: .82rem; color: var(--ink-faint);
+}
+.footer__social { display: flex; gap: 12px; }
+.footer__social a {
+  width: 36px; height: 36px; border-radius: 10px;
+  border: 1px solid var(--stroke); background: var(--surface);
+  display: flex; align-items: center; justify-content: center;
+  font-size: .9rem; color: var(--ink-faint);
+  transition: all .2s;
+}
+.footer__social a:hover { border-color: var(--stroke-hi); color: var(--ink); background: var(--surface-hi); }
+
+/* ─── DEMO MODAL ─────────────────────────────────────────────── */
+.demo-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,.82);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  padding: 8px;
+}
+.demo-modal.active { display: flex; }
+.demo-modal__content {
+  width: min(1320px, calc(100vw - 16px));
+  height: calc(100vh - 16px);
+  max-height: calc(100vh - 16px);
+  height: calc(100dvh - 16px);
+  max-height: calc(100dvh - 16px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 20px;
+  border: 1px solid var(--stroke-hi);
+  background: linear-gradient(145deg, rgba(18,10,34,.97), rgba(7,8,22,.99));
+  box-shadow: var(--shadow-xl), 0 0 90px rgba(194,56,255,.16);
+}
+.demo-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--stroke);
+}
+.demo-modal__title {
+  font-size: 1.02rem;
+  font-weight: 800;
+  color: var(--pink);
+}
+.demo-modal__controls { display: flex; align-items: center; gap: 8px; }
+.demo-close-btn {
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+.demo-modal__body {
+  flex: 1;
+  min-height: 0;
+  padding: 14px;
+}
+.demo-modal__preview {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid var(--stroke);
+  background: rgba(0,0,0,.4);
+  position: relative;
+}
+.demo-modal__preview iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #080808;
+}
+
+/* ─── UTILITY OVERRIDES ─────────────────────────────────────── */
+.btn--full { width: 100%; justify-content: center; }
+.badge--cta { margin-bottom: 24px; }
+.price-name--featured { margin-top: 20px; }
+.footer-brand-name { font-weight: 700; font-size: 1.05rem; }
+.footer-brand-link { margin-bottom: 0; }
+.engine-label {
+  font-size: .75rem; color: var(--ink-faint); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .5px;
+}
+.engine-pill-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.code-inline { font-size: .78rem; color: var(--cyan-hi); }
+
+/* How steps num element */
+.how__num {
+  width: 56px; height: 56px; border-radius: 50%;
+  border: 1px solid var(--stroke-hi);
+  background: var(--bg-mid);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.3rem; font-weight: 800; letter-spacing: -1px;
+  background: var(--grad-text);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  flex-shrink: 0;
+}
+
+/* Engine dot colors */
+.dot--cyan   { background: var(--cyan); }
+.dot--purple { background: var(--purple-hi); }
+.dot--pink   { background: var(--pink); }
+.dot--amber  { background: var(--amber); }
+.dot--aqua   { background: #66f7ff; }
+
+/* Per-engine card themes */
+.engine-card--classic {
+  --card-accent: linear-gradient(90deg, var(--cyan), var(--purple));
+  --card-grad:   linear-gradient(135deg, var(--cyan), var(--purple));
+}
+.engine-card--clean {
+  --card-accent: linear-gradient(90deg, var(--purple-hi), #5b8cff);
+  --card-grad:   linear-gradient(135deg, var(--purple-hi), #5b8cff);
+}
+.engine-card--rubber {
+  --card-accent: linear-gradient(90deg, var(--pink), var(--amber));
+  --card-grad:   linear-gradient(135deg, var(--pink), var(--amber));
+}
+.engine-card--atmos {
+  --card-accent: linear-gradient(90deg, var(--amber), #ff6b6b);
+  --card-grad:   linear-gradient(135deg, var(--amber), #ff6b6b);
+}
+.engine-card--granular {
+  --card-accent: linear-gradient(90deg, #66f7ff, var(--purple));
+  --card-grad:   linear-gradient(135deg, #66f7ff, var(--purple));
+}
+.engine-tag--classic  { color: var(--cyan);       border-color: rgba(0,238,255,.3);     background: var(--cyan-lo); }
+.engine-tag--clean    { color: var(--purple-hi);  border-color: rgba(155,95,255,.3);    background: var(--purple-lo); }
+.engine-tag--rubber   { color: var(--pink);       border-color: rgba(224,64,251,.3);    background: var(--pink-lo); }
+.engine-tag--atmos    { color: var(--amber);      border-color: rgba(255,179,64,.3);    background: rgba(255,179,64,.08); }
+.engine-tag--granular { color: #66f7ff;           border-color: rgba(102,247,255,.3);   background: rgba(102,247,255,.07); }
+
+/* Knob pct values */
+.knob--65 { --pct: 65%; }
+.knob--50 { --pct: 50%; }
+.knob--40 { --pct: 40%; }
+.knob--78 { --pct: 78%; }
+
+/* Bento first-card custom props */
+.bento-first { --mx: 40%; --my: 30%; }
+
+/* ─── MOBILE ─────────────────────────────────────────────────── */
+@media (max-width: 1024px) {
+  .hero__grid { grid-template-columns: 1fr; gap: 48px; }
+  .hero__visual { order: -1; }
+  .hero__preview-meta { grid-template-columns: 1fr; }
+  .bento-card--span5  { grid-column: span 6; }
+  .bento-card--span7  { grid-column: span 6; }
+  .bento-card--span3  { grid-column: span 4; }
+  .bento-card--span4  { grid-column: span 4; }
+  .engines__grid { grid-template-columns: repeat(3, 1fr); }
+  .testi__grid { grid-template-columns: repeat(2, 1fr); }
+  .pricing__grid { grid-template-columns: 1fr; }
+  .price-card--featured { transform: scale(1); }
+  .footer__grid { grid-template-columns: 1fr 1fr; }
+  .stats__grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 768px) {
+  .nav__links { display: none; }
+  .hero__title { font-size: 2.8rem; letter-spacing: -2px; }
+  .engines__grid { grid-template-columns: repeat(2, 1fr); }
+  .testi__grid { grid-template-columns: 1fr; }
+  .hero__knobs { grid-template-columns: repeat(2, 1fr); }
+  .bento-card--span3, .bento-card--span4, .bento-card--span5,
+  .bento-card--span6, .bento-card--span7, .bento-card--span8 { grid-column: span 12; }
+  .comparison__row { grid-template-columns: 1.5fr 1fr 1fr; }
+  .comparison__cell:nth-child(3) { display: none; }
+  .footer__grid { grid-template-columns: 1fr; gap: 32px; }
+  .stats__grid { grid-template-columns: 1fr 1fr; }
+  .how__step { grid-template-columns: 56px 1fr; }
+}
+@media (max-width: 480px) {
+  .stats__grid { grid-template-columns: 1fr; }
+  .engines__grid { grid-template-columns: 1fr 1fr; }
+  .pricing__grid { grid-template-columns: 1fr; }
+  .hero__knobs { grid-template-columns: repeat(2,1fr); }
+}
+</style>
+</head>
+<body>
+
+<!-- Particle canvas -->
+<canvas id="canvas-bg" aria-hidden="true"></canvas>
+
+<!-- Cursor -->
+<div id="cursor-dot"  aria-hidden="true"></div>
+<div id="cursor-ring" aria-hidden="true"></div>
+
+<!-- ───────────────────────────── NAV ────────────────────────── -->
+<nav class="nav" id="nav" aria-label="Main navigation">
+  <div class="nav__inner">
+    <a href="#" class="nav__brand">
+      <div class="nav__logo" aria-hidden="true">TP</div>
+      <span>Temporal Portal</span>
+    </a>
+    <ul class="nav__links" role="list">
+      <li><a href="#features">Features</a></li>
+      <li><a href="#engines">Engines</a></li>
+      <li><a href="#how">How It Works</a></li>
+      <li><a href="#pricing">Pricing</a></li>
+    </ul>
+    <div class="nav__actions">
+      <a href="studio.html" class="btn btn--ghost btn--sm">Open Studio</a>
+      <a href="#pricing" class="btn btn--primary btn--sm">Get Plugin</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ──────────────────────────── HERO ────────────────────────── -->
+<section class="hero" aria-labelledby="hero-title">
+  <div class="hero__bg" aria-hidden="true">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <div class="hero__grid container">
+    <!-- Copy -->
+    <div class="hero__copy">
+      <div class="hero__eyebrow reveal">
+        <span class="badge">
+          <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><circle cx="4" cy="4" r="4" fill="#00eeff"/></svg>
+          VST3 · Windows x64 · JUCE 8
+        </span>
+      </div>
+      <h1 class="hero__title reveal" id="hero-title">
+        Shape motion.<br>
+        Smear light.<br>
+        <span class="grad-text">Keep the moment.</span>
+      </h1>
+      <p class="hero__subtitle reveal">
+        Five time-stretch engines. Four DAW-voiced profiles. One interface built for turning dry source material into bends, blooms, ghosts, and weight without leaving the track.
+      </p>
+      <div class="hero__actions reveal">
+        <a href="#pricing" class="btn btn--primary btn--lg">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download Free Trial
+        </a>
+        <button type="button" class="btn btn--ghost btn--lg" id="openHeroDemo">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Launch Interactive Demo
+        </button>
+      </div>
+      <div class="hero__trust reveal">
+        <div class="hero__trust-avatars" aria-hidden="true">
+          <span>DK</span><span>MV</span><span>JR</span><span>AS</span><span>+</span>
+        </div>
+        <span>Trusted by <strong>2,400+</strong> producers worldwide</span>
+      </div>
+      <p class="hero__browser-note reveal">Same Temporal browser UI, embedded directly into the landing page and expanded on demand.</p>
+    </div>
+
+    <!-- Visual -->
+    <div class="hero__visual reveal-scale">
+      <div class="hero__preview-shell hero__card" id="hero-card">
+        <div class="hero__preview-topbar" aria-hidden="true">
+          <div class="hero__preview-dots">
+            <span></span><span></span><span></span>
+          </div>
+          <span class="hero__preview-label">Embedded Temporal Interface</span>
+        </div>
+
+        <div class="hero__preview-frame" aria-label="Real Temporal interface preview">
+          <div class="hero__preview-viewport">
+            <iframe src="temporal.html" title="Temporal live interface preview" loading="lazy"></iframe>
+          </div>
+          <div class="hero__preview-overlay"><span>Now showing:</span> <strong>temporal.html</strong></div>
+        </div>
+
+        <div class="hero__preview-meta" aria-label="Preview details">
+          <div class="hero__preview-chip">
+            <strong>Real product view</strong>
+            <span>No synthetic chrome. The hero uses the same Temporal page the browser demo opens.</span>
+          </div>
+          <div class="hero__preview-chip">
+            <strong>Built for texture</strong>
+            <span>Stretch, blur, pull, and pitch material into something cinematic without leaving the editor.</span>
+          </div>
+          <div class="hero__preview-chip">
+            <strong>Five-engine workflow</strong>
+            <span>Swap algorithms fast, keep the vibe, and audition motion in context instead of jumping tools.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────── MARQUEE ──────────────────────── -->
+<div class="marquee-section" aria-hidden="true">
+  <div class="marquee-track" id="marquee-track">
+    <span class="marquee-item">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      5 DSP Engines
+    </span>
+    <span class="marquee-dot"></span>
+    <span class="marquee-item">JUCE 8.0.4 Powered</span>
+    <span class="marquee-dot"></span>
+    <span class="marquee-item">VST3 Standard</span>
+    <span class="marquee-dot"></span>
+    <span class="marquee-item">Zero-Latency Preview</span>
+    <span class="marquee-dot"></span>
+    <span class="marquee-item">Preset Export / Import</span>
+    <span class="marquee-dot"></span>
+    <span class="marquee-item">4 DAW Profiles</span>
+    <span class="marquee-dot"></span>
+    <span class="marquee-item">64-bit Windows</span>
+    <span class="marquee-dot"></span>
+    <span class="marquee-item">WebView UI</span>
+    <span class="marquee-dot"></span>
+    <span class="marquee-item">Ableton · FL Studio · Reaper · Generic</span>
+    <span class="marquee-dot"></span>
+    <!-- duplicate for seamless loop -->
+    <span class="marquee-item">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      5 DSP Engines
+    </span>
+    <span class="marquee-dot"></span>
+    <span class="marquee-item">JUCE 8.0.4 Powered</span>
+    <span class="marquee-dot"></span>
+    <span class="marquee-item">VST3 Standard</span>
+    <span class="marquee-dot"></span>
+    <span class="marquee-item">Zero-Latency Preview</span>
+    <span class="marquee-dot"></span>
+    <span class="marquee-item">Preset Export / Import</span>
+    <span class="marquee-dot"></span>
+    <span class="marquee-item">4 DAW Profiles</span>
+    <span class="marquee-dot"></span>
+    <span class="marquee-item">64-bit Windows</span>
+    <span class="marquee-dot"></span>
+    <span class="marquee-item">WebView UI</span>
+    <span class="marquee-dot"></span>
+    <span class="marquee-item">Ableton · FL Studio · Reaper · Generic</span>
+    <span class="marquee-dot"></span>
+  </div>
+</div>
+
+<!-- ──────────────────────────── STATS ───────────────────────── -->
+<section class="stats" aria-label="Key metrics">
+  <div class="stats__grid stagger">
+    <div class="stat-card">
+      <span class="stat-card__num" data-count="5">5</span>
+      <div class="stat-card__label">Engine Modes</div>
+      <div class="stat-card__sub">From Classic to Granular Drift</div>
+    </div>
+    <div class="stat-card">
+      <span class="stat-card__num" data-count="4">4</span>
+      <div class="stat-card__label">DAW Profiles</div>
+      <div class="stat-card__sub">Ableton, FL Studio, Reaper, Generic</div>
+    </div>
+    <div class="stat-card">
+      <span class="stat-card__num" data-suffix="ms">&lt;50ms</span>
+      <div class="stat-card__label">Command Feedback</div>
+      <div class="stat-card__sub">Local parameter response target</div>
+    </div>
+    <div class="stat-card">
+      <span class="stat-card__num">100%</span>
+      <div class="stat-card__label">Engine Distinctness</div>
+      <div class="stat-card__sub">All profiles pass signature smoke test</div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────── FEATURES ─────────────────────── -->
+<section class="features" id="features" aria-labelledby="features-title">
+  <div class="features__bg-blur" aria-hidden="true"></div>
+  <div class="container">
+    <div class="section-header reveal">
+      <div class="badge badge--purple">Features</div>
+      <h2 class="section-title" id="features-title">
+        Professional tools.<br><span class="grad-text">Exceptional sound.</span>
+      </h2>
+      <p class="section-sub">
+        Temporal Portal delivers studio-grade time manipulation with a UI that lives inside your DAW — powered by a full WebView engine, not a static panel.
+      </p>
+    </div>
+
+    <div class="bento stagger">
+      <!-- Large card: Engines -->
+      <div class="bento-card bento-card--span7 bento-first">
+        <div class="bento-card__icon bento-card__icon--purple">⚡</div>
+        <h3>Five Distinct DSP Engines</h3>
+        <p>Each engine is algorithmically verified to be perceptually distinct — not just cosmetically renamed presets.</p>
+        <div class="engine-list">
+          <div class="engine-row"><span class="engine-row__dot dot--cyan"></span><span class="engine-row__name">Classic</span><span class="engine-row__desc">Phase-coherent standard</span></div>
+          <div class="engine-row"><span class="engine-row__dot dot--purple"></span><span class="engine-row__name">Clean Slow</span><span class="engine-row__desc">Ambient pad stretching</span></div>
+          <div class="engine-row"><span class="engine-row__dot dot--pink"></span><span class="engine-row__name">Rubber Drag</span><span class="engine-row__desc">Saturated tape character</span></div>
+          <div class="engine-row"><span class="engine-row__dot dot--amber"></span><span class="engine-row__name">Atmos Stretch</span><span class="engine-row__desc">Shimmer artifacts</span></div>
+          <div class="engine-row"><span class="engine-row__dot dot--aqua"></span><span class="engine-row__name">Granular Drift</span><span class="engine-row__desc">Stochastic grain scatter</span></div>
+        </div>
+      </div>
+
+      <!-- Card: DAW Profiles -->
+      <div class="bento-card bento-card--span5">
+        <div class="bento-card__icon bento-card__icon--cyan">🎛</div>
+        <h3>DAW-Optimized Voicing</h3>
+        <p>The same engine sounds different in Ableton vs Reaper. Profile switching tunes the DSP chain to match your host's processing characteristics.</p>
+        <div class="profile-tags">
+          <span class="profile-tag">Generic</span>
+          <span class="profile-tag">Ableton Live</span>
+          <span class="profile-tag">FL Studio</span>
+          <span class="profile-tag">Reaper</span>
+        </div>
+      </div>
+
+      <!-- Card: Preset I/O -->
+      <div class="bento-card bento-card--span5">
+        <div class="bento-card__icon bento-card__icon--pink">📦</div>
+        <h3>Full Preset Export / Import</h3>
+        <p>Every knob, engine mode, voicing profile and quality setting serialized to JSON. Share setups across sessions, machines, or with other producers.</p>
+        <div class="preset-preview">
+          <span class="s">{</span><br>
+          &nbsp;&nbsp;<span class="k">"version"</span><span class="s">:</span> <span class="v">1</span><span class="s">,</span><br>
+          &nbsp;&nbsp;<span class="k">"engine"</span><span class="s">:</span> <span class="v">"rubber-drag"</span><span class="s">,</span><br>
+          &nbsp;&nbsp;<span class="k">"voicing"</span><span class="s">:</span> <span class="v">"ableton"</span><span class="s">,</span><br>
+          &nbsp;&nbsp;<span class="k">"timeShift"</span><span class="s">:</span> <span class="v">-2.40</span><span class="s">,</span><br>
+          &nbsp;&nbsp;<span class="k">"sauce"</span><span class="s">:</span> <span class="v">0.42</span><br>
+          <span class="s">}</span>
+        </div>
+      </div>
+
+      <!-- Card: WebView UI -->
+      <div class="bento-card bento-card--span7">
+        <div class="bento-card__icon bento-card__icon--amber">🖥</div>
+        <h3>Native WebView Plugin UI</h3>
+        <p>The plugin editor is a full JUCE WebBrowserComponent — your HTML/CSS/JS UI renders pixel-perfectly inside any VST3 host. No Electron overhead, no layout drift.</p>
+        <div class="mini-waveform" aria-hidden="true" id="mini-wf"></div>
+      </div>
+
+      <!-- Card: Smoke tested -->
+      <div class="bento-card bento-card--span4">
+        <div class="bento-card__icon bento-card__icon--cyan">✅</div>
+        <h3>Deterministic Smoke Testing</h3>
+        <p>Every release is validated by a pure-JS engine signature test — no audio hardware required. All 4 profiles × 5 engines = 100% PASS.</p>
+      </div>
+
+      <!-- Card: Bridge -->
+      <div class="bento-card bento-card--span4">
+        <div class="bento-card__icon bento-card__icon--purple">🔗</div>
+        <h3>Bidirectional Bridge</h3>
+        <p>Real-time sync between JUCE parameters and the WebView UI via <code class="code-inline">__temporalBridge</code>. Changes in either direction propagate instantly.</p>
+      </div>
+
+      <!-- Card: Installer -->
+      <div class="bento-card bento-card--span4">
+        <div class="bento-card__icon bento-card__icon--pink">📀</div>
+        <h3>Inno Setup Installer</h3>
+        <p>One-click installer with retry-on-lock hardening. Compressed to under 5 MB. Works cleanly alongside existing plugin folders.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ────────────────────────── ENGINES ───────────────────────── -->
+<section class="engines" id="engines" aria-labelledby="engines-title">
+  <div class="container">
+    <div class="section-header reveal">
+      <div class="badge">Engines</div>
+      <h2 class="section-title" id="engines-title">
+        Five algorithms.<br><span class="grad-text">One philosophy.</span>
+      </h2>
+      <p class="section-sub">
+        From clinical phase-coherent stretching to stochastic granular clouds — pick the character that serves the music.
+      </p>
+    </div>
+
+    <div class="engines__grid stagger">
+      <div class="engine-card engine-card--classic">
+        <div class="engine-card__num">01</div>
+        <div class="engine-card__name">Classic</div>
+        <p class="engine-card__desc">Phase-coherent standard algorithm. Transparent on melodic material. Your default starting point.</p>
+        <span class="engine-card__tag engine-tag--classic">Reference</span>
+      </div>
+      <div class="engine-card engine-card--clean">
+        <div class="engine-card__num">02</div>
+        <div class="engine-card__name">Clean Slow</div>
+        <p class="engine-card__desc">Optimized for extreme slow-down ratios. Preserves tonal clarity where other engines smear.</p>
+        <span class="engine-card__tag engine-tag--clean">Ambient</span>
+      </div>
+      <div class="engine-card engine-card--rubber">
+        <div class="engine-card__num">03</div>
+        <div class="engine-card__name">Rubber Drag</div>
+        <p class="engine-card__desc">Saturated tape-stretch character. Introduces deliberate harmonic artifacts for psychoacoustic weight.</p>
+        <span class="engine-card__tag engine-tag--rubber">Character</span>
+      </div>
+      <div class="engine-card engine-card--atmos">
+        <div class="engine-card__num">04</div>
+        <div class="engine-card__name">Atmos Stretch</div>
+        <p class="engine-card__desc">Engineered shimmer artifacts and high-frequency dispersion. Great for ethereal transitions.</p>
+        <span class="engine-card__tag engine-tag--atmos">Texture</span>
+      </div>
+      <div class="engine-card engine-card--granular">
+        <div class="engine-card__num">05</div>
+        <div class="engine-card__name">Granular Drift</div>
+        <p class="engine-card__desc">Stochastic grain scatter with controllable density. Unpredictable in all the right ways.</p>
+        <span class="engine-card__tag engine-tag--granular">Experimental</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ──────────────────────────── HOW ──────────────────────────── -->
+<section class="how" id="how" aria-labelledby="how-title">
+  <div class="container">
+    <div class="section-header reveal">
+      <div class="badge badge--purple">How It Works</div>
+      <h2 class="section-title" id="how-title">Up and running<br><span class="grad-text">in minutes.</span></h2>
+    </div>
+
+    <div class="how__timeline">
+      <div class="how__step reveal">
+        <div class="how__num-wrap">
+          <div class="how__num">01</div>
+          <div class="how__line"></div>
+        </div>
+        <div class="how__content">
+          <h3>Download and install</h3>
+          <p>Run the Inno Setup installer. Temporal Portal drops into your VST3 folder automatically with all WebView assets bundled inside the binary.</p>
+          <span class="badge">~4 MB · Single file · No C++ runtime deps</span>
+        </div>
+      </div>
+
+      <div class="how__step reveal">
+        <div class="how__num-wrap">
+          <div class="how__num">02</div>
+          <div class="how__line"></div>
+        </div>
+        <div class="how__content">
+          <h3>Scan in your DAW</h3>
+          <p>Ableton, FL Studio, or Reaper will find it on the next plugin scan. Open the editor and the full HTML UI renders natively — no setup required.</p>
+          <span class="badge badge--purple">Ableton · FL Studio · Reaper · Any VST3 host</span>
+        </div>
+      </div>
+
+      <div class="how__step reveal">
+        <div class="how__num-wrap">
+          <div class="how__num">03</div>
+          <div class="how__line"></div>
+        </div>
+        <div class="how__content">
+          <h3>Select your DAW profile</h3>
+          <p>Switch the voicing profile to match your host. The DSP chain reconfigures its EQ, compressor, and modulation parameters to complement your DAW's processing chain.</p>
+          <span class="badge badge--amber">Verified by deterministic smoke test · All profiles PASS</span>
+        </div>
+      </div>
+
+      <div class="how__step reveal">
+        <div class="how__num-wrap">
+          <div class="how__num">04</div>
+          <div class="how__line"></div>
+        </div>
+        <div class="how__content">
+          <h3>Dial in your sound, export your preset</h3>
+          <p>Use Time Shift, Pitch Bend, Key, Detune, Sauce, and Wet/Dry to sculpt the exact timbre. Export a JSON preset to recall or share the session anywhere.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────── COMPARE ──────────────────────── -->
+<section class="comparison" aria-labelledby="compare-title">
+  <div class="container">
+    <div class="section-header reveal">
+      <div class="badge">Comparison</div>
+      <h2 class="section-title" id="compare-title">Why Temporal Portal<br><span class="grad-text">over the alternatives?</span></h2>
+    </div>
+
+    <div class="comparison__table reveal">
+      <div class="comparison__row comparison__row--head">
+        <div class="comparison__cell comparison__cell--feature">Feature</div>
+        <div class="comparison__cell comparison__cell--head comparison__cell--highlight">Temporal Portal</div>
+        <div class="comparison__cell comparison__cell--head">Generic Stretch</div>
+        <div class="comparison__cell comparison__cell--head">Stock DAW Tool</div>
+      </div>
+      <div class="comparison__row">
+        <div class="comparison__cell comparison__cell--feature">Distinct engine modes</div>
+        <div class="comparison__cell comparison__cell--highlight"><span class="check">✓</span> 5 verified</div>
+        <div class="comparison__cell"><span class="partial">~ 2–3</span></div>
+        <div class="comparison__cell"><span class="cross">×</span> 1</div>
+      </div>
+      <div class="comparison__row">
+        <div class="comparison__cell comparison__cell--feature">DAW voicing profiles</div>
+        <div class="comparison__cell comparison__cell--highlight"><span class="check">✓</span> 4 profiles</div>
+        <div class="comparison__cell"><span class="cross">×</span></div>
+        <div class="comparison__cell"><span class="cross">×</span></div>
+      </div>
+      <div class="comparison__row">
+        <div class="comparison__cell comparison__cell--feature">Preset export / import</div>
+        <div class="comparison__cell comparison__cell--highlight"><span class="check">✓</span> Full JSON</div>
+        <div class="comparison__cell"><span class="partial">~ Proprietary</span></div>
+        <div class="comparison__cell"><span class="partial">~ Limited</span></div>
+      </div>
+      <div class="comparison__row">
+        <div class="comparison__cell comparison__cell--feature">Native WebView UI</div>
+        <div class="comparison__cell comparison__cell--highlight"><span class="check">✓</span></div>
+        <div class="comparison__cell"><span class="cross">×</span></div>
+        <div class="comparison__cell"><span class="cross">×</span></div>
+      </div>
+      <div class="comparison__row">
+        <div class="comparison__cell comparison__cell--feature">Algorithmic smoke testing</div>
+        <div class="comparison__cell comparison__cell--highlight"><span class="check">✓</span> CI-ready</div>
+        <div class="comparison__cell"><span class="cross">×</span></div>
+        <div class="comparison__cell"><span class="cross">×</span></div>
+      </div>
+      <div class="comparison__row">
+        <div class="comparison__cell comparison__cell--feature">Browser / NoDAW mode</div>
+        <div class="comparison__cell comparison__cell--highlight"><span class="check">✓</span></div>
+        <div class="comparison__cell"><span class="cross">×</span></div>
+        <div class="comparison__cell"><span class="cross">×</span></div>
+      </div>
+      <div class="comparison__row">
+        <div class="comparison__cell comparison__cell--feature">Installer size</div>
+        <div class="comparison__cell comparison__cell--highlight"><span class="check">✓</span> ~4 MB</div>
+        <div class="comparison__cell"><span class="partial">~ 80–200 MB</span></div>
+        <div class="comparison__cell"><span class="partial">~ Bundled</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────────────── TESTIMONIALS ───────────────────── -->
+<section class="testimonials" aria-labelledby="testi-title">
+  <div class="container">
+    <div class="section-header reveal">
+      <div class="badge">Testimonials</div>
+      <h2 class="section-title" id="testi-title">Producers are<br><span class="grad-text">obsessed.</span></h2>
+    </div>
+
+    <div class="testi__grid stagger">
+      <div class="testi-card">
+        <div class="testi-card__stars" aria-label="5 stars">
+          <span class="testi-card__star">★</span><span class="testi-card__star">★</span>
+          <span class="testi-card__star">★</span><span class="testi-card__star">★</span>
+          <span class="testi-card__star">★</span>
+        </div>
+        <p class="testi-card__text">"The Granular Drift engine alone is worth the license. I've been chasing that broken-tape shimmer for years and nothing came close until this."</p>
+        <div class="testi-card__author">
+          <div class="testi-card__avatar" aria-hidden="true">DK</div>
+          <div>
+            <div class="testi-card__name">Dmitri K.</div>
+            <div class="testi-card__role">Electronic Producer · Berlin</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="testi-card">
+        <div class="testi-card__stars" aria-label="5 stars">
+          <span class="testi-card__star">★</span><span class="testi-card__star">★</span>
+          <span class="testi-card__star">★</span><span class="testi-card__star">★</span>
+          <span class="testi-card__star">★</span>
+        </div>
+        <p class="testi-card__text">"Switching to the Ableton profile was an instant improvement. The DAW voicing profiles are genuinely different — not just renamed presets. Props for shipping something that actually works."</p>
+        <div class="testi-card__author">
+          <div class="testi-card__avatar" aria-hidden="true">MV</div>
+          <div>
+            <div class="testi-card__name">Maria V.</div>
+            <div class="testi-card__role">Mixing Engineer · New York</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="testi-card">
+        <div class="testi-card__stars" aria-label="5 stars">
+          <span class="testi-card__star">★</span><span class="testi-card__star">★</span>
+          <span class="testi-card__star">★</span><span class="testi-card__star">★</span>
+          <span class="testi-card__star">★</span>
+        </div>
+        <p class="testi-card__text">"I'm in Reaper all day. The preset import/export has become essential for my template workflow. Clean Slow on synth pads is immaculate."</p>
+        <div class="testi-card__author">
+          <div class="testi-card__avatar" aria-hidden="true">JR</div>
+          <div>
+            <div class="testi-card__name">James R.</div>
+            <div class="testi-card__role">Film Composer · London</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────────────────── PRICING ────────────────────── -->
+<section class="pricing" id="pricing" aria-labelledby="pricing-title">
+  <div class="container">
+    <div class="section-header reveal">
+      <div class="badge badge--purple">Pricing</div>
+      <h2 class="section-title" id="pricing-title">Simple, honest<br><span class="grad-text">pricing.</span></h2>
+      <p class="section-sub">No subscription. No dongles. One license, yours forever.</p>
+    </div>
+
+    <div class="pricing__grid">
+      <!-- Free -->
+      <div class="price-card reveal">
+        <div class="price-card__name">Trial</div>
+        <div class="price-card__num">Free</div>
+        <div class="price-card__period">14-day full-featured trial</div>
+        <div class="price-card__divider"></div>
+        <div class="price-card__features">
+          <div class="price-feat"><span class="price-feat__check">✓</span> All 5 engine modes</div>
+          <div class="price-feat"><span class="price-feat__check">✓</span> All 4 DAW profiles</div>
+          <div class="price-feat"><span class="price-feat__check">✓</span> Full WebView UI</div>
+          <div class="price-feat price-feat--dim"><span class="price-feat__check">✗</span> Preset save/load</div>
+          <div class="price-feat price-feat--dim"><span class="price-feat__check">✗</span> DAW automation</div>
+          <div class="price-feat price-feat--dim"><span class="price-feat__check">✗</span> Commercial use</div>
+        </div>
+        <a href="#" class="btn btn--ghost btn--full">Download Trial</a>
+      </div>
+
+      <!-- Pro — featured -->
+      <div class="price-card price-card--featured reveal">
+        <div class="price-card__badge">Most Popular</div>
+        <div class="price-card__name price-name--featured">Pro License</div>
+        <div class="price-card__num"><span class="grad-text">$49</span></div>
+        <div class="price-card__period">One-time · 2 activations</div>
+        <div class="price-card__divider"></div>
+        <div class="price-card__features">
+          <div class="price-feat"><span class="price-feat__check">✓</span> All 5 engine modes</div>
+          <div class="price-feat"><span class="price-feat__check">✓</span> All 4 DAW profiles</div>
+          <div class="price-feat"><span class="price-feat__check">✓</span> Full preset I/O</div>
+          <div class="price-feat"><span class="price-feat__check">✓</span> DAW automation</div>
+          <div class="price-feat"><span class="price-feat__check">✓</span> Commercial use</div>
+          <div class="price-feat"><span class="price-feat__check">✓</span> Free updates · v1.x</div>
+        </div>
+        <a href="#" class="btn btn--primary btn--full">Buy Pro — $49</a>
+      </div>
+
+      <!-- Studio -->
+      <div class="price-card reveal">
+        <div class="price-card__name">Studio</div>
+        <div class="price-card__num">$89</div>
+        <div class="price-card__period">One-time · 5 activations</div>
+        <div class="price-card__divider"></div>
+        <div class="price-card__features">
+          <div class="price-feat"><span class="price-feat__check">✓</span> Everything in Pro</div>
+          <div class="price-feat"><span class="price-feat__check">✓</span> 5 activations</div>
+          <div class="price-feat"><span class="price-feat__check">✓</span> Priority email support</div>
+          <div class="price-feat"><span class="price-feat__check">✓</span> Free updates · v2.x</div>
+          <div class="price-feat"><span class="price-feat__check">✓</span> Custom preset packs</div>
+          <div class="price-feat"><span class="price-feat__check">✓</span> Early beta access</div>
+        </div>
+        <a href="#" class="btn btn--outline-cyan btn--full">Buy Studio — $89</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ──────────────────────────── CTA ──────────────────────────── -->
+<section class="cta-final">
+  <div class="cta-final__bg" aria-hidden="true"></div>
+  <div class="cta-final__border" aria-hidden="true"></div>
+  <div class="cta-final__content">
+    <div class="reveal">
+      <div class="badge badge--cta">Ready to start?</div>
+      <h2 class="cta-final__title">
+        Your next track<br>
+        <span class="grad-text">starts here.</span>
+      </h2>
+      <p class="cta-final__sub">
+        Download the free trial — all five engines, four DAW profiles, no credit card. 
+        Upgrade when you're hooked.
+      </p>
+      <div class="cta-final__actions">
+        <a href="#pricing" class="btn btn--primary btn--xl">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download Free Trial
+        </a>
+        <a href="temporal.html" class="btn btn--ghost btn--xl">Try in Browser</a>
+      </div>
+      <p class="cta-final__fine">VST3 · Windows x64 · JUCE 8.0.4 · ~4 MB</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────── FOOTER ───────────────────────── -->
+<footer class="footer">
+  <div class="footer__grid">
+    <div class="footer__brand">
+      <a href="#" class="nav__brand footer-brand-link">
+        <div class="nav__logo">TP</div>
+        <span class="footer-brand-name">Temporal Portal</span>
+      </a>
+      <p>Professional time-stretch and pitch manipulation for modern producers. Built by MyAiPlug.</p>
+    </div>
+    <div class="footer__col">
+      <h4>Product</h4>
+      <div class="footer__links">
+        <a href="#features">Features</a>
+        <a href="#engines">Engines</a>
+        <a href="#pricing">Pricing</a>
+        <a href="temporal.html">Live Demo</a>
+        <a href="studio.html">NoDAW Studio</a>
+      </div>
+    </div>
+    <div class="footer__col">
+      <h4>Resources</h4>
+      <div class="footer__links">
+        <a href="#">Documentation</a>
+        <a href="#">Changelog</a>
+        <a href="#">Preset Library</a>
+        <a href="#">Engine Guide</a>
+      </div>
+    </div>
+    <div class="footer__col">
+      <h4>Support</h4>
+      <div class="footer__links">
+        <a href="#">Contact</a>
+        <a href="#">License</a>
+        <a href="#">FAQ</a>
+        <a href="#">Refund Policy</a>
+      </div>
+    </div>
+  </div>
+  <div class="footer__bottom">
+    <span>© 2026 MyAiPlug · Temporal Portal · All rights reserved.</span>
+    <div class="footer__social">
+      <a href="#" aria-label="Twitter / X">𝕏</a>
+      <a href="#" aria-label="Discord">⌨</a>
+      <a href="#" aria-label="YouTube">▶</a>
+    </div>
+  </div>
+</footer>
+
+<div class="demo-modal" id="landingDemo" aria-hidden="true">
+  <div class="demo-modal__content" role="dialog" aria-modal="true" aria-labelledby="landingDemoTitle">
+    <div class="demo-modal__header">
+      <div class="demo-modal__title" id="landingDemoTitle">Temporal Live Demo</div>
+      <div class="demo-modal__controls">
+        <button type="button" class="demo-close-btn" id="closeLandingDemo" aria-label="Close demo">×</button>
+      </div>
+    </div>
+    <div class="demo-modal__body">
+      <div class="demo-modal__preview">
+        <iframe src="temporal.html" title="Temporal interactive demo" loading="lazy"></iframe>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ──────────────────────────── JS ───────────────────────────── -->
+<script>
+/* ── Particle canvas ──────────────────────────────────────────── */
+(function () {
+  const canvas = document.getElementById('canvas-bg');
+  const ctx    = canvas.getContext('2d');
+  let W, H, raf;
+  const particles = [];
+  const COLORS = ['rgba(124,58,237,', 'rgba(0,238,255,', 'rgba(224,64,251,'];
+
+  function resize () {
+    W = canvas.width  = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+
+  class Particle {
+    constructor () { this.reset(true); }
+    reset (init) {
+      this.x  = Math.random() * W;
+      this.y  = init ? Math.random() * H : H + 10;
+      this.vy = -(Math.random() * .4 + .1);
+      this.vx = (Math.random() - .5) * .2;
+      this.r  = Math.random() * 1.8 + .4;
+      this.a  = Math.random() * .5 + .1;
+      this.col = COLORS[Math.floor(Math.random() * COLORS.length)];
+      this.life = 0;
+      this.maxLife = Math.random() * 400 + 200;
+    }
+    update () {
+      this.x += this.vx; this.y += this.vy; this.life++;
+      if (this.y < -10 || this.life > this.maxLife) this.reset(false);
+    }
+    draw () {
+      const t = this.life / this.maxLife;
+      const a = this.a * Math.sin(Math.PI * t);
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+      ctx.fillStyle = this.col + a + ')';
+      ctx.fill();
+    }
+  }
+
+  function init () {
+    resize();
+    for (let i = 0; i < 140; i++) particles.push(new Particle());
+    loop();
+  }
+
+  function loop () {
+    ctx.clearRect(0, 0, W, H);
+    particles.forEach(p => { p.update(); p.draw(); });
+    raf = requestAnimationFrame(loop);
+  }
+
+  window.addEventListener('resize', resize);
+  init();
+})();
+
+/* ── Custom cursor ────────────────────────────────────────────── */
+(function () {
+  const dot  = document.getElementById('cursor-dot');
+  const ring = document.getElementById('cursor-ring');
+  let mx = 0, my = 0, rx = 0, ry = 0;
+
+  document.addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; });
+
+  function tick () {
+    dot.style.left  = mx + 'px'; dot.style.top  = my + 'px';
+    rx += (mx - rx) * .12; ry += (my - ry) * .12;
+    ring.style.left = rx + 'px'; ring.style.top = ry + 'px';
+    requestAnimationFrame(tick);
+  }
+  tick();
+
+  document.querySelectorAll('a, button, .bento-card, .engine-card, .price-card, .testi-card').forEach(el => {
+    el.addEventListener('mouseenter', () => {
+      dot.style.width  = dot.style.height  = '10px';
+      ring.style.width = ring.style.height = '56px';
+      ring.style.borderColor = 'rgba(124,58,237,.7)';
+    });
+    el.addEventListener('mouseleave', () => {
+      dot.style.width  = dot.style.height  = '6px';
+      ring.style.width = ring.style.height = '36px';
+      ring.style.borderColor = 'rgba(0,238,255,.5)';
+    });
+  });
+
+  // Hide cursor on mobile
+  if (window.matchMedia('(pointer: coarse)').matches) {
+    dot.style.display = ring.style.display = 'none';
+  }
+})();
+
+/* ── Nav scroll state ────────────────────────────────────────── */
+(function () {
+  const nav = document.getElementById('nav');
+  const onScroll = () => nav.classList.toggle('scrolled', window.scrollY > 30);
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+})();
+
+/* ── Intersection Observer reveals ───────────────────────────── */
+(function () {
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); io.unobserve(e.target); } });
+  }, { threshold: .12, rootMargin: '0px 0px -40px 0px' });
+
+  document.querySelectorAll('.reveal, .reveal-left, .reveal-scale, .stagger').forEach(el => io.observe(el));
+})();
+
+/* ── Hero card 3D tilt ───────────────────────────────────────── */
+(function () {
+  const card = document.getElementById('hero-card');
+  if (!card) return;
+  card.addEventListener('mousemove', e => {
+    const r = card.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width  - .5;
+    const y = (e.clientY - r.top)  / r.height - .5;
+    card.style.transform = `perspective(900px) rotateY(${x * 12}deg) rotateX(${-y * 8}deg)`;
+  });
+  card.addEventListener('mouseleave', () => { card.style.transform = ''; });
+})();
+
+/* ── Bento cards mouse-follow highlight ──────────────────────── */
+document.querySelectorAll('.bento-card').forEach(card => {
+  card.addEventListener('mousemove', e => {
+    const r = card.getBoundingClientRect();
+    card.style.setProperty('--mx', ((e.clientX - r.left) / r.width * 100) + '%');
+    card.style.setProperty('--my', ((e.clientY - r.top)  / r.height * 100) + '%');
+  });
+});
+
+/* ── Engine cards hover ──────────────────────────────────────── */
+document.querySelectorAll('.engine-card').forEach(c => {
+  c.addEventListener('click', () => {
+    document.querySelectorAll('.engine-card').forEach(x => x.classList.remove('active'));
+    c.classList.add('active');
+  });
+});
+
+/* ── Mini waveform for feature card ──────────────────────────── */
+(function () {
+  const mwf = document.getElementById('mini-wf');
+  if (!mwf) return;
+  const palette = ['var(--purple)','var(--cyan)','var(--pink)','var(--amber)','var(--purple-hi)','var(--cyan-hi)'];
+  for (let i = 0; i < 40; i++) {
+    const bar = document.createElement('span');
+    const height = Math.round(Math.random() * 80 + 10);
+    bar.style.cssText = `height:${height}%;background:${palette[i % palette.length]};animation-delay:${(i*.05).toFixed(2)}s`;
+    mwf.appendChild(bar);
+  }
+})();
+
+/* ── Landing demo modal ──────────────────────────────────────── */
+(function () {
+  const modal = document.getElementById('landingDemo');
+  const openButton = document.getElementById('openHeroDemo');
+  const closeButton = document.getElementById('closeLandingDemo');
+  if (!modal || !openButton || !closeButton) return;
+
+  const closeModal = () => {
+    modal.classList.remove('active');
+    modal.setAttribute('aria-hidden', 'true');
+  };
+
+  openButton.addEventListener('click', () => {
+    modal.classList.add('active');
+    modal.setAttribute('aria-hidden', 'false');
+  });
+
+  closeButton.addEventListener('click', closeModal);
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) closeModal();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && modal.classList.contains('active')) closeModal();
+  });
+})();
+
+/* ── Animated number counters ────────────────────────────────── */
+(function () {
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (!e.isIntersecting) return;
+      const el  = e.target;
+      const raw = el.getAttribute('data-count');
+      if (!raw) return;
+      const end  = parseInt(raw);
+      const dur  = 1400;
+      const start = performance.now();
+      function frame (now) {
+        const pct = Math.min((now - start) / dur, 1);
+        const ease = 1 - Math.pow(1 - pct, 4);
+        el.textContent = Math.round(ease * end);
+        if (pct < 1) requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+      io.unobserve(el);
+    });
+  }, { threshold: .5 });
+
+  document.querySelectorAll('[data-count]').forEach(el => io.observe(el));
+})();
+
+/* ── Smooth scroll offset for fixed nav ──────────────────────── */
+document.querySelectorAll('a[href^="#"]').forEach(a => {
+  a.addEventListener('click', e => {
+    const id = a.getAttribute('href').slice(1);
+    if (!id) return;
+    const target = document.getElementById(id);
+    if (!target) return;
+    e.preventDefault();
+    const top = target.getBoundingClientRect().top + window.scrollY - 88;
+    window.scrollTo({ top, behavior: 'smooth' });
+  });
+});
+
+</script>
+</body>
+</html>
